@@ -29,9 +29,24 @@ services:
       - mongodb
       - chroma
     env_file:
-      - .env.example
+      - backend/.env
     ports:
       - "8000:8000"
+    volumes:
+      - ./backend/storage:/app/storage
+      - backend_data:/data
+
+  worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: rag-worker
+    depends_on:
+      - mongodb
+      - chroma
+    env_file:
+      - backend/.env
+    command: ["python", "-m", "app.workers.ingestion_worker"]
     volumes:
       - ./backend/storage:/app/storage
       - backend_data:/data
@@ -44,7 +59,7 @@ services:
     depends_on:
       - backend
     env_file:
-      - frontend/.env.local.example
+      - frontend/.env.local
     ports:
       - "3000:3000"
 

@@ -6,9 +6,11 @@ __pycache__/
 *.pyc
 .env
 .env.local
+backend/.env
 backend/storage/raw/*
 backend/storage/markdown/*
 backend/storage/temp/*
 frontend/.env.local
 chroma/
 data/
+storage/

@@ -9,10 +9,11 @@ from app.models.base import MongoBaseModel
 class IngestionJobModel(MongoBaseModel):
     id: str = Field(alias="_id")
     document_id: str
-    document_version_id: Optional[str] = None
     owner_user_id: Optional[str] = None
+    document_version_id: Optional[str] = None
     job_type: Literal["ingest", "reprocess", "delete"] = "ingest"
-    status: Literal["pending", "running", "succeeded", "failed", "cancelled"] = "pending"
+    status: Literal["queued", "running", "succeeded", "failed", "cancelled"] = "queued"
+    current_step: Literal["uploaded", "convert_to_markdown", "converting", "chunking", "embedding", "done"] = "uploaded"
     progress: int = 0
     error_message: Optional[str] = None
     metadata: dict[str, Any] = Field(default_factory=dict)

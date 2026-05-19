@@ -10,6 +10,7 @@ type Props = {
 
 export function UploadBox({ onUploaded }: Props) {
   const [file, setFile] = useState<File | null>(null);
+  const ownerUserId = "demo_user_001";
   const [busy, setBusy] = useState(false);
 
   return (
@@ -20,7 +21,7 @@ export function UploadBox({ onUploaded }: Props) {
         if (!file) return;
         setBusy(true);
         try {
-          await apiClient.documents.upload(file);
+          await apiClient.documents.upload(file, ownerUserId);
           await onUploaded();
           setFile(null);
         } finally {

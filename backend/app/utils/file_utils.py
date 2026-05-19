@@ -1,4 +1,5 @@
 from pathlib import Path
+import shutil
 from fastapi import UploadFile
 
 
@@ -12,3 +13,13 @@ async def save_upload_file(upload_file: UploadFile, destination_path: str) -> st
     with open(destination_path, "wb") as f:
         f.write(content)
     return destination_path
+
+
+def remove_path(path: str) -> None:
+    target = Path(path)
+    if not target.exists():
+        return
+    if target.is_dir():
+        shutil.rmtree(target)
+    else:
+        target.unlink()

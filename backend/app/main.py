@@ -8,6 +8,7 @@ from app.api.routes.sessions import router as sessions_router
 from app.api.routes.system_documents import router as system_documents_router
 from app.core.config import settings
 from app.core.logging import configure_logging
+from app.db.init_db import init_mongodb
 
 
 configure_logging()
@@ -27,6 +28,11 @@ def create_app() -> FastAPI:
     app.include_router(system_documents_router, prefix="/system-documents", tags=["system-documents"])
     app.include_router(sessions_router, prefix="/sessions", tags=["sessions"])
     app.include_router(chat_router, prefix="/chat", tags=["chat"])
+
+    @app.on_event("startup")
+    async def startup_event() -> None:
+        await init_mongodb()
+
     return app
 
 

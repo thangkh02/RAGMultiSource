@@ -10,9 +10,10 @@ import type { DocumentItem } from "@/features/documents/types";
 
 export default function DocumentsPage() {
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
+  const ownerUserId = "demo_user_001";
 
   async function refresh() {
-    const result = await apiClient.documents.list();
+    const result = await apiClient.documents.list(ownerUserId);
     setDocuments(result);
   }
 

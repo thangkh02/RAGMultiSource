@@ -32,10 +32,14 @@ export const apiClient = {
     ask: (payload: ChatRequest) => request<ChatResponse>("/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
   },
   documents: {
-    list: () => request<DocumentItem[]>("/documents"),
-    upload: async (file: File) => {
+    list: (ownerUserId: string) => request<DocumentItem[]>(`/documents?owner_user_id=${encodeURIComponent(ownerUserId)}`),
+    upload: async (file: File, ownerUserId: string, sessionId?: string) => {
       const formData = new FormData();
       formData.append("file", file);
+      formData.append("owner_user_id", ownerUserId);
+      if (sessionId) {
+        formData.append("session_id", sessionId);
+      }
       return request("/documents/upload", { method: "POST", body: formData });
     },
   },

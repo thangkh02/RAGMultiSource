@@ -16,7 +16,7 @@ class DocumentModel(MongoBaseModel):
     visibility: Literal["global", "private"]
     owner_user_id: Optional[str] = None
     uploaded_in_session_id: Optional[str] = None
-    status: Literal["uploaded", "processing", "ready", "failed", "deleted"] = "uploaded"
+    status: Literal["uploaded", "processing", "converted", "ready", "failed", "deleted"] = "uploaded"
     raw_storage_path: str
     markdown_storage_path: Optional[str] = None
     page_count: Optional[int] = None

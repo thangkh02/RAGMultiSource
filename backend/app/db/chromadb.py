@@ -8,7 +8,7 @@ from app.core.config import settings
 
 @lru_cache
 def get_chroma_client() -> chromadb.PersistentClient:
-    return chromadb.PersistentClient(path=settings.CHROMA_PERSIST_DIR)
+    return chromadb.PersistentClient(path=str(settings.chroma_persist_dir_path))
 
 
 def get_chroma_collection() -> Any:

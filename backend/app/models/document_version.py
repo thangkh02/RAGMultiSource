@@ -10,7 +10,7 @@ class DocumentVersionModel(MongoBaseModel):
     id: str = Field(alias="_id")
     document_id: str
     version_number: int
-    parser: str = "docling"
+    parser: str = "markitdown"
     parser_version: str = "latest"
     markdown_storage_path: str
     chunking_strategy: str = "markdown_heading_recursive"

@@ -8,9 +8,11 @@ from app.schemas.common_schema import TimestampedItem
 
 class DocumentUploadResponse(BaseModel):
     document_id: str
+    job_id: str | None = None
     filename: str
     status: str
-    message: str
+    raw_storage_path: str
+    message: Optional[str] = None
 
 
 class DocumentItem(TimestampedItem):

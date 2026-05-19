@@ -13,7 +13,7 @@ class MessageModel(MongoBaseModel):
     role: Literal["user", "assistant", "system"]
     content: str
     sources: list[dict[str, Any]] = Field(default_factory=list)
-    model_name: Optional[str] = None
+    llm_model_name: Optional[str] = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
