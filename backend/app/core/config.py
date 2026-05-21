@@ -1,3 +1,4 @@
+import os
 from functools import lru_cache
 from pathlib import Path
 
@@ -12,8 +13,13 @@ class Settings(BaseSettings):
     CHROMA_PERSIST_DIR: str = "backend/chroma"
     CHROMA_COLLECTION_NAME: str = "rag_chunks"
     EMBEDDING_MODEL_NAME: str = "BAAI/bge-small-en-v1.5"
+    OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL: str = "gpt-4o-mini"
+    LANGSMITH_TRACING: str = "false"
+    LANGSMITH_ENDPOINT: str = "https://api.smith.langchain.com"
+    LANGSMITH_API_KEY: str = ""
+    LANGSMITH_PROJECT: str = "RAGMultiDocs"
     UPLOAD_DIR: str = "backend/storage/raw"
     MARKDOWN_DIR: str = "backend/storage/markdown"
     CORS_ORIGINS: str = "http://localhost:3000"
@@ -46,6 +52,12 @@ class Settings(BaseSettings):
     def chroma_persist_dir_path(self) -> Path:
         return self._resolve_path(self.CHROMA_PERSIST_DIR)
 
+    @property
+    def vector_collection_name(self) -> str:
+        if self.OPENAI_API_KEY:
+            return f"{self.CHROMA_COLLECTION_NAME}_openai"
+        return self.CHROMA_COLLECTION_NAME
+
 
 @lru_cache
 def get_settings() -> Settings:
@@ -53,3 +65,21 @@ def get_settings() -> Settings:
 
 
 settings = get_settings()
+
+
+def configure_langsmith() -> None:
+    os.environ.setdefault("LANGSMITH_TRACING", settings.LANGSMITH_TRACING)
+    os.environ.setdefault("LANGSMITH_ENDPOINT", settings.LANGSMITH_ENDPOINT)
+    os.environ.setdefault("LANGSMITH_PROJECT", settings.LANGSMITH_PROJECT)
+    if settings.LANGSMITH_API_KEY:
+        os.environ.setdefault("LANGSMITH_API_KEY", settings.LANGSMITH_API_KEY)
+
+    # Compatibility with older LangChain releases that still read LANGCHAIN_*.
+    os.environ.setdefault("LANGCHAIN_TRACING_V2", settings.LANGSMITH_TRACING)
+    os.environ.setdefault("LANGCHAIN_ENDPOINT", settings.LANGSMITH_ENDPOINT)
+    os.environ.setdefault("LANGCHAIN_PROJECT", settings.LANGSMITH_PROJECT)
+    if settings.LANGSMITH_API_KEY:
+        os.environ.setdefault("LANGCHAIN_API_KEY", settings.LANGSMITH_API_KEY)
+
+
+configure_langsmith()

@@ -7,6 +7,10 @@ pydantic-settings>=2.4.0
 python-multipart>=0.0.9
 sentence-transformers>=3.0.0
 openai>=1.40.0
+langchain>=0.3.0
+langchain-core>=0.3.0
+langchain-openai>=0.2.0
+langsmith>=0.1.0
 markitdown
 langchain-text-splitters>=0.3.0
 pypdf>=6.0.0

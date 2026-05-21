@@ -1,4 +1,8 @@
-from openai import OpenAI
+from __future__ import annotations
+
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_openai import ChatOpenAI
 
 from app.core.config import settings
 from app.rag.generation.prompts import RAG_SYSTEM_PROMPT
@@ -6,24 +10,38 @@ from app.rag.generation.prompts import RAG_SYSTEM_PROMPT
 
 class OpenAILLMService:
     def __init__(self) -> None:
-        self.client = OpenAI(api_key=settings.OPENAI_API_KEY or None) if settings.OPENAI_API_KEY else None
-
-    def generate_answer(self, question: str, contexts: list[dict]) -> str:
-        context_text = "\n\n".join(
+        self.prompt = ChatPromptTemplate.from_messages(
             [
-                f"[{idx + 1}] {item.get('content', '')}\nMETADATA: {item.get('metadata', {})}"
+                ("system", RAG_SYSTEM_PROMPT),
+                ("human", "Question: {question}\n\nContext:\n{context}"),
+            ]
+        )
+        self.llm = None
+        self.chain = None
+        if settings.OPENAI_API_KEY:
+            self.llm = ChatOpenAI(
+                model=settings.OPENAI_MODEL,
+                api_key=settings.OPENAI_API_KEY,
+                temperature=0,
+            )
+            self.chain = self.prompt | self.llm | StrOutputParser()
+
+    def _build_context_text(self, contexts: list[dict]) -> str:
+        if not contexts:
+            return ""
+        return "\n\n".join(
+            [
+                f"[{idx + 1}] {item.get('content', '')}\nMETADATA: {item.get('metadata', {})}\nSIMILARITY: {item.get('similarity')}"
                 for idx, item in enumerate(contexts)
             ]
         )
-        if self.client is None:
-            if not contexts:
-                return "Không tìm thấy thông tin trong tài liệu."
-            return f"[TODO] OpenAI API key is not configured. Context available but generation is disabled.\n\n{context_text[:1200]}"
-        response = self.client.chat.completions.create(
-            model=settings.OPENAI_MODEL,
-            messages=[
-                {"role": "system", "content": RAG_SYSTEM_PROMPT},
-                {"role": "user", "content": f"Question: {question}\n\nContext:\n{context_text}"},
-            ],
-        )
-        return response.choices[0].message.content or ""
+
+    def generate_answer(self, question: str, contexts: list[dict]) -> str:
+        if not contexts:
+            return "Không tìm thấy thông tin trong tài liệu."
+        if self.chain is None:
+            context_text = self._build_context_text(contexts)
+            return f"[LangChain] OPENAI_API_KEY chưa được cấu hình.\n\n{context_text[:1200]}"
+        context_text = self._build_context_text(contexts)
+        result = self.chain.invoke({"question": question, "context": context_text})
+        return result.strip() if isinstance(result, str) else str(result)

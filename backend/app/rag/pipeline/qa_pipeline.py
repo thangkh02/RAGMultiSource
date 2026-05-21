@@ -4,6 +4,7 @@ from app.rag.retrieval.filters import build_retrieval_filter
 from app.rag.retrieval.query_router import QueryRouter
 from app.rag.retrieval.retriever import Retriever
 from app.schemas.common_schema import SourceItem
+from langsmith import traceable
 
 
 class QAPipeline:
@@ -13,6 +14,17 @@ class QAPipeline:
         self.llm = OpenAILLMService()
 
     def run(
+        self,
+        question: str,
+        user_id: str,
+        session_id: str | None,
+        scope: str,
+        selected_document_ids: list[str] | None = None,
+    ) -> dict:
+        return self._run_traced(question, user_id, session_id, scope, selected_document_ids)
+
+    @traceable(name="rag_qa_pipeline")
+    def _run_traced(
         self,
         question: str,
         user_id: str,

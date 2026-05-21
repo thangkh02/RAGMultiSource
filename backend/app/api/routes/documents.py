@@ -4,10 +4,14 @@ from app.api.deps import get_current_user_id, get_document_service
 from app.schemas.convert_schema import DocumentConvertResponse
 from app.schemas.ingestion_job_schema import IngestionJobItem
 from app.schemas.document_schema import DocumentItem, DocumentUploadResponse
-from app.services.document_service import DocumentService
-from app.services.markitdown_converter import MarkItDownConversionService
 
 router = APIRouter()
+
+
+def get_markitdown_conversion_service():
+    from app.services.markitdown_converter import MarkItDownConversionService
+
+    return MarkItDownConversionService()
 
 
 @router.post("/upload", response_model=DocumentUploadResponse)
@@ -15,7 +19,7 @@ async def upload_document(
     file: UploadFile = File(...),
     session_id: str | None = Form(default=None),
     user_id: str = Depends(get_current_user_id),
-    service: DocumentService = Depends(get_document_service),
+    service=Depends(get_document_service),
 ):
     try:
         payload = await service.upload_user_document(file=file, owner_user_id=user_id, session_id=session_id)
@@ -35,7 +39,7 @@ async def upload_document(
 @router.get("", response_model=list[DocumentItem])
 async def list_documents(
     user_id: str = Depends(get_current_user_id),
-    service: DocumentService = Depends(get_document_service),
+    service=Depends(get_document_service),
 ):
     return await service.list_documents(user_id)
 
@@ -44,7 +48,7 @@ async def list_documents(
 async def get_document(
     document_id: str,
     user_id: str = Depends(get_current_user_id),
-    service: DocumentService = Depends(get_document_service),
+    service=Depends(get_document_service),
 ):
     document = await service.get_document(document_id, user_id)
     if document is None:
@@ -56,7 +60,7 @@ async def get_document(
 async def list_ingestion_jobs(
     document_id: str,
     user_id: str = Depends(get_current_user_id),
-    service: DocumentService = Depends(get_document_service),
+    service=Depends(get_document_service),
 ):
     jobs = await service.list_ingestion_jobs(document_id, user_id)
     if jobs is None:
@@ -68,7 +72,7 @@ async def list_ingestion_jobs(
 async def delete_document(
     document_id: str,
     user_id: str = Depends(get_current_user_id),
-    service: DocumentService = Depends(get_document_service),
+    service=Depends(get_document_service),
 ):
     deleted = await service.delete_document(document_id, user_id)
     if not deleted:
@@ -80,7 +84,7 @@ async def delete_document(
 async def convert_document(
     document_id: str,
     user_id: str = Depends(get_current_user_id),
-    service: MarkItDownConversionService = Depends(MarkItDownConversionService),
+    service=Depends(get_markitdown_conversion_service),
 ):
     try:
         document = await service.convert_document(document_id, user_id)

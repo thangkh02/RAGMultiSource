@@ -2,7 +2,6 @@ from fastapi import APIRouter, Depends
 
 from app.api.deps import get_chat_service, get_current_user_id
 from app.schemas.chat_schema import ChatRequest, ChatResponse
-from app.services.chat_service import ChatService
 
 router = APIRouter()
 
@@ -11,7 +10,7 @@ router = APIRouter()
 async def ask_chat(
     request: ChatRequest,
     user_id: str = Depends(get_current_user_id),
-    service: ChatService = Depends(get_chat_service),
+    service=Depends(get_chat_service),
 ):
     try:
         result = await service.ask_question(request=request, user_id=user_id)

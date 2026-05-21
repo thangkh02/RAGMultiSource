@@ -9,6 +9,15 @@ from app.core.constants import (
 )
 
 
+def _and(*conditions: dict) -> dict:
+    clean_conditions = [condition for condition in conditions if condition]
+    if not clean_conditions:
+        return {}
+    if len(clean_conditions) == 1:
+        return clean_conditions[0]
+    return {"$and": clean_conditions}
+
+
 def build_retrieval_filter(
     scope: str,
     user_id: str,
@@ -18,28 +27,27 @@ def build_retrieval_filter(
     selected_document_ids = selected_document_ids or []
 
     if scope == RETRIEVAL_SCOPE_CURRENT_UPLOAD:
-        base = {
-            "source_type": SOURCE_TYPE_USER_UPLOAD,
-            "owner_user_id": user_id,
-        }
+        conditions = [
+            {"source_type": SOURCE_TYPE_USER_UPLOAD},
+            {"owner_user_id": user_id},
+        ]
         if session_id:
-            base["session_id"] = session_id
+            conditions.append({"session_id": session_id})
+        base = _and(*conditions)
     elif scope == RETRIEVAL_SCOPE_ALL_USER_UPLOADS:
-        base = {"source_type": SOURCE_TYPE_USER_UPLOAD, "owner_user_id": user_id}
+        base = _and({"source_type": SOURCE_TYPE_USER_UPLOAD}, {"owner_user_id": user_id})
     elif scope == RETRIEVAL_SCOPE_SYSTEM_DOCS:
-        base = {"source_type": SOURCE_TYPE_SYSTEM, "visibility": VISIBILITY_GLOBAL}
+        base = _and({"source_type": SOURCE_TYPE_SYSTEM}, {"visibility": VISIBILITY_GLOBAL})
     else:
         base = {
             "$or": [
-                {"source_type": SOURCE_TYPE_SYSTEM, "visibility": VISIBILITY_GLOBAL},
-                {"source_type": SOURCE_TYPE_USER_UPLOAD, "owner_user_id": user_id},
+                _and({"source_type": SOURCE_TYPE_SYSTEM}, {"visibility": VISIBILITY_GLOBAL}),
+                _and({"source_type": SOURCE_TYPE_USER_UPLOAD}, {"owner_user_id": user_id}),
             ]
         }
 
     if selected_document_ids:
         selection_filter = {"document_id": {"$in": selected_document_ids}}
-        if "$or" in base:
-            return {"$and": [base, selection_filter]}
-        return {"$and": [base, selection_filter]}
+        return _and(base, selection_filter)
 
     return base

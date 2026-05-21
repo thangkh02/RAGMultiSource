@@ -155,7 +155,7 @@ class IngestionPipeline:
                             "model": settings.EMBEDDING_MODEL_NAME,
                             "dimension": len(embedding),
                             "vector_store": "chroma",
-                            "collection_name": settings.CHROMA_COLLECTION_NAME,
+                            "collection_name": settings.vector_collection_name,
                             "vector_id": chunk_id,
                             "embedded_at": None,
                         },

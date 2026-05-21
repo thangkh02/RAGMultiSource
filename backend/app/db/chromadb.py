@@ -14,6 +14,6 @@ def get_chroma_client() -> chromadb.PersistentClient:
 def get_chroma_collection() -> Any:
     client = get_chroma_client()
     return client.get_or_create_collection(
-        name=settings.CHROMA_COLLECTION_NAME,
+        name=settings.vector_collection_name,
         metadata={"hnsw:space": "cosine"},
     )
