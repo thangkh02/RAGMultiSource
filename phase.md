@@ -21,82 +21,72 @@
 
 Hiện tại chưa xong công việc nào.
 
-## Các đầu việc cần làm
+## Kế hoạch các đầu việc còn lại
 
-- **1. Xác định rõ các scope truy xuất**  
-  Chia rõ hệ thống sẽ retrieve trong: file vừa upload, file trong session hiện tại, file cũ của user, tài liệu hệ thống, hoặc cả hai nguồn.
+### Giai đoạn 1: Hoàn thiện truy xuất đúng tài liệu
 
-- **2. Làm Intent Router**  
-  Nhận diện user đang hỏi loại nào: hỏi file hiện tại, hỏi tài liệu hệ thống, hỏi file cũ, hỏi tiếp câu trước, hay hỏi so sánh.
+- **1. Làm Scope Resolver**  
+  Xác định query này cần tìm trong: file vừa upload, file trong session hiện tại, file cũ của user, tài liệu hệ thống, hoặc mixed.
 
-- **3. Làm Scope Resolver**  
-  Từ intent, xác định chính xác nên tìm trong nguồn nào: `current_upload`, `current_session`, `user_old_docs`, `system_docs`, `mixed`.
+- **2. Làm Document Resolver**  
+  Xác định đúng document cụ thể trước khi retrieve chunk, ví dụ: "file này", "file hôm qua", "tài liệu lần trước", "file vừa upload".
 
-- **4. Làm Document Resolver**  
-  Tìm đúng document cụ thể trước khi retrieve chunk. Ví dụ: "file hôm qua", "file này", "tài liệu lần trước", "file vừa upload".
+- **3. Bổ sung Conversation State**  
+  Lưu session hiện tại, danh sách file đã upload, document vừa dùng, scope vừa dùng, `last_referenced_doc`, `last_scope`, `last_sources`, `current_session_docs` để hỗ trợ hỏi tiếp.
 
-- **5. Xử lý câu hỏi follow-up**  
-  Với câu như "thế thời hạn bao lâu?", "còn lệ phí thì sao?", hệ thống phải dùng lại document vừa hỏi gần nhất.
+- **4. Bắt buộc metadata filter khi retrieve**  
+  Không search toàn bộ vector DB. Cần filter theo `document_id`, `source_type`, `owner_user_id`, `session_id`, `visibility`, `uploaded_at` để đảm bảo đúng ngữ cảnh và đúng quyền.
 
-- **6. Rewrite câu hỏi trước khi retrieve**  
-  Biến câu hỏi mơ hồ thành câu hỏi đầy đủ hơn. Ví dụ: "thế thời hạn bao lâu?" -> "Trong tài liệu đang hỏi, thời hạn giải quyết là bao lâu?"
+- **5. Lưu `last_referenced_doc` cho câu hỏi follow-up**  
+  Sau mỗi lượt trả lời, lưu lại document vừa dùng để hỗ trợ các câu hỏi nối tiếp như "thế thời hạn bao lâu?" hoặc "còn lệ phí thì sao?".
 
-- **7. Tạo Retrieval Planner**  
-  Quyết định mỗi câu hỏi cần search ở đâu, search mấy nguồn, top-k bao nhiêu, filter metadata nào.
+### Giai đoạn 2: Hoàn thiện truy vấn và câu trả lời
 
-- **8. Bắt buộc dùng metadata filter khi retrieve**  
-  Không search toàn bộ vector DB. Phải filter theo `document_id`, `source_type`, `owner_user_id`, `session_id`, `visibility`, `uploaded_at`.
+- **6. Làm Intent Router**  
+  Nhận diện user đang hỏi file hiện tại, tài liệu hệ thống, file cũ, câu hỏi tiếp theo hay câu hỏi so sánh.
 
-- **9. Tách retrieval cho từng nguồn**  
-  Nếu hỏi file user thì chỉ search file user. Nếu hỏi tài liệu hệ thống thì chỉ search system docs. Nếu hỏi so sánh thì search riêng 2 nguồn.
+- **7. Rewrite câu hỏi mơ hồ sau khi đã biết scope/document**  
+  Biến câu hỏi thiếu ngữ cảnh thành câu hỏi đầy đủ hơn để tăng độ chính xác khi truy xuất.
 
-- **10. Thêm hybrid retrieval nếu cần**  
-  Kết hợp vector search với keyword/BM25 để tăng độ chính xác, nhất là với câu hỏi có tên thủ tục, mã hồ sơ, ngày tháng, số hiệu văn bản.
-
-- **11. Thêm reranking**  
-  Sau khi lấy top-k chunk ban đầu, dùng reranker để chọn lại những chunk liên quan nhất trước khi đưa vào LLM.
-
-- **12. Xử lý chunk gần nhau**  
-  Nếu retrieve trúng một chunk, có thể lấy thêm chunk trước/sau để tránh mất ngữ cảnh.
-
-- **13. Loại bỏ chunk trùng hoặc nhiễu**  
-  Dedupe các chunk gần giống nhau, tránh đưa quá nhiều context lặp vào prompt.
-
-- **14. Context packing**  
-  Sắp xếp context đưa vào LLM theo document, page, section để câu trả lời mạch lạc và dễ dẫn nguồn.
-
-- **15. Thiết kế prompt trả lời bám sát context**  
+- **8. Thiết kế prompt trả lời bám sát context**  
   Bắt LLM chỉ trả lời dựa trên chunk retrieve được, không tự suy diễn nếu tài liệu không có thông tin.
 
-- **16. Xử lý khi không tìm thấy thông tin**  
-  Nếu retrieval không có chunk đủ liên quan, hệ thống phải nói "không tìm thấy trong tài liệu", không được bịa.
+- **9. Xử lý khi không tìm thấy thông tin**  
+  Nếu retrieval không có chunk đủ liên quan, hệ thống phải trả lời rõ là không tìm thấy trong tài liệu, không được bịa.
 
-- **17. Trả lời rõ nguồn**  
-  Phân biệt rõ: "Theo tài liệu bạn upload..." hoặc "Theo tài liệu hệ thống...". Nếu mixed thì tách hai phần.
+- **10. Trả lời rõ nguồn tài liệu**  
+  Phân biệt rõ câu trả lời theo tài liệu upload hay theo tài liệu hệ thống. Nếu có nhiều nguồn thì tách phần trả lời tương ứng.
 
-- **18. Lưu lại document vừa dùng**  
-  Sau mỗi câu trả lời, lưu `last_referenced_doc` để hỗ trợ câu hỏi tiếp theo.
+### Giai đoạn 3: Logging và kiểm thử
 
-- **19. Logging toàn bộ pipeline**  
-  Log lại: query gốc, query rewrite, intent, scope, document chọn, filter retrieval, chunk lấy ra, câu trả lời.
+- **11. Logging toàn bộ pipeline**  
+  Ghi lại query gốc, query rewrite, intent, scope, document được chọn, filter retrieval, chunk retrieved và câu trả lời cuối cùng.
 
-- **20. Tạo bộ test retrieval**  
-  Chuẩn bị các câu hỏi test cho: file vừa upload, system docs, file cũ, hỏi tiếp, so sánh, câu mơ hồ.
+- **12. Tạo test case theo từng nhóm tình huống**  
+  Chuẩn bị test cho file mới upload, file cũ, system docs, follow-up, mixed source và câu hỏi mơ hồ.
 
-- **21. Đánh giá retrieval**  
-  Kiểm tra top-k có lấy đúng chunk không bằng các metric như Hit@k, Recall@k, MRR hoặc kiểm tra thủ công theo test case.
+- **13. Kiểm tra retrieval có lấy đúng chunk hay không**  
+  Xác nhận pipeline truy xuất ra đúng chunk cần thiết trước khi đưa vào LLM.
 
-- **22. Đánh giá answer**  
-  Kiểm tra câu trả lời có đúng context không, có bịa không, có dẫn đúng nguồn không.
+- **14. Đánh giá answer theo context**  
+  Kiểm tra câu trả lời có đúng nguồn, đúng nội dung và không suy diễn ngoài tài liệu.
 
-- **23. Xử lý ambiguity**  
-  Nếu user nói "file cũ" nhưng có nhiều file phù hợp, hệ thống nên hỏi lại thay vì tự đoán.
+### Giai đoạn 4: Tối ưu sau
 
-- **24. Kiểm tra phân quyền dữ liệu**  
-  Đảm bảo user không bao giờ retrieve được file của user khác.
+- **15. Hybrid retrieval**  
+  Kết hợp vector search với keyword/BM25 nếu cần.
 
-- **25. Tối ưu top-k và threshold**  
-  Tune số lượng chunk retrieve, ngưỡng similarity, số chunk đưa vào LLM để cân bằng đúng và không nhiễu.
+- **16. Reranking**  
+  Chọn lại chunk liên quan hơn sau bước retrieve ban đầu.
+
+- **17. Dedupe chunk**  
+  Loại bỏ chunk trùng hoặc nhiễu để tránh lặp context.
+
+- **18. Context packing**  
+  Sắp xếp context theo document, page, section trước khi đưa vào LLM.
+
+- **19. Tối ưu top-k và threshold**  
+  Tune số lượng chunk retrieve, ngưỡng similarity và số lượng context đưa vào LLM để cân bằng giữa đúng và gọn.
 
 ---
 
@@ -104,10 +94,11 @@ Hiện tại chưa xong công việc nào.
 
 ```text
 User query
-→ Rewrite / hiểu câu hỏi
+→ Load conversation state / last_referenced_doc
 → Intent Router
 → Scope Resolver
 → Document Resolver
+→ Query Rewrite
 → Retrieval Planner
 → Metadata Filter
 → Vector / Hybrid Search

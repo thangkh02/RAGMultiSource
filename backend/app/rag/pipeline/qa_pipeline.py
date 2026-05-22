@@ -1,7 +1,6 @@
-from app.core.constants import RETRIEVAL_SCOPE_AUTO
+from app.core.constants import RETRIEVAL_SCOPE_AUTO, RETRIEVAL_SCOPE_NEED_CLARIFICATION
 from app.rag.generation.openai_llm import OpenAILLMService
-from app.rag.retrieval.filters import build_retrieval_filter
-from app.rag.retrieval.query_router import QueryRouter
+from app.rag.retrieval.scope_resolver import ScopeResolver
 from app.rag.retrieval.retriever import Retriever
 from app.schemas.common_schema import SourceItem
 from langsmith import traceable
@@ -9,7 +8,7 @@ from langsmith import traceable
 
 class QAPipeline:
     def __init__(self) -> None:
-        self.router = QueryRouter()
+        self.scope_resolver = ScopeResolver()
         self.retriever = Retriever()
         self.llm = OpenAILLMService()
 
@@ -32,15 +31,21 @@ class QAPipeline:
         scope: str,
         selected_document_ids: list[str] | None = None,
     ) -> dict:
-        resolved_scope = self.router.route(question) if scope == RETRIEVAL_SCOPE_AUTO else scope
-        where_filter = build_retrieval_filter(
-            scope=resolved_scope,
+        resolution = self.scope_resolver.resolve(
+            question=question,
             user_id=user_id,
             session_id=session_id,
+            scope=scope if scope != RETRIEVAL_SCOPE_AUTO else RETRIEVAL_SCOPE_AUTO,
             selected_document_ids=selected_document_ids,
         )
-        contexts = self.retriever.retrieve(question=question, where_filter=where_filter)
-        answer = self.llm.generate_answer(question=question, contexts=contexts)
+        if resolution.scope == RETRIEVAL_SCOPE_NEED_CLARIFICATION:
+            answer = "Mình cần bạn làm rõ tài liệu muốn hỏi: file vừa upload, file cũ, tài liệu hệ thống, hoặc một file cụ thể."
+            contexts: list[dict] = []
+        else:
+            contexts = []
+            if resolution.should_retrieve:
+                contexts = self.retriever.retrieve(question=question, where_filter=resolution.metadata_filter)
+            answer = self.llm.generate_answer(question=question, contexts=contexts)
         sources = [
             SourceItem(
                 document_id=item["metadata"].get("document_id", ""),
@@ -58,4 +63,10 @@ class QAPipeline:
             ).model_dump()
             for item in contexts
         ]
-        return {"answer": answer, "sources": sources, "raw_contexts": contexts, "scope": resolved_scope}
+        return {
+            "answer": answer,
+            "sources": sources,
+            "raw_contexts": contexts,
+            "scope": resolution.scope,
+            "scope_resolution": resolution.model_dump(),
+        }

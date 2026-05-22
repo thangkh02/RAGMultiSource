@@ -11,7 +11,20 @@ class RetrievalLogModel(MongoBaseModel):
     user_id: str
     session_id: Optional[str] = None
     question: str
-    resolved_scope: Literal["current_upload", "all_user_uploads", "system_docs", "mixed", "auto"]
+    resolved_scope: Literal[
+        "current_upload",
+        "current_session_uploads",
+        "all_user_uploads",
+        "user_all_uploads",
+        "user_file_name",
+        "system_docs",
+        "system_procedure",
+        "hybrid_system_and_user",
+        "general_query",
+        "need_clarification",
+        "mixed",
+        "auto",
+    ]
     selected_document_ids: list[str] = Field(default_factory=list)
     retrieval_filter: dict[str, Any] = Field(default_factory=dict)
     top_k: int = 5
