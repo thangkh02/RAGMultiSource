@@ -13,11 +13,14 @@ from app.core.constants import (
     INGESTION_JOB_STEP_CONVERT_TO_MARKDOWN,
     INGESTION_JOB_STEP_EMBEDDING,
     INGESTION_JOB_STEP_DONE,
+    SOURCE_TYPE_USER_UPLOAD,
 )
 from app.models.document import DocumentModel
 from app.rag.chunking.markdown_chunker import MarkdownChunker
+from app.rag.chunking.user_upload_chunker import UserUploadChunker
 from app.rag.embedding.bge_embedding import BGEEmbeddingService
 from app.rag.converter.markitdown_converter import MarkItDownMarkdownConverter
+from app.rag.converter.user_upload_converter import UserUploadMarkdownConverter
 from app.rag.vectorstore.chroma_store import ChromaVectorStore
 from app.repositories.chunk_repository import ChunkRepository
 from app.repositories.document_repository import DocumentRepository
@@ -27,8 +30,10 @@ from app.utils.id_utils import generate_id
 
 class IngestionPipeline:
     def __init__(self) -> None:
-        self.converter = MarkItDownMarkdownConverter()
-        self.chunker = MarkdownChunker()
+        self.system_converter = MarkItDownMarkdownConverter()
+        self.system_chunker = MarkdownChunker()
+        self.user_upload_converter = UserUploadMarkdownConverter()
+        self.user_upload_chunker = UserUploadChunker()
         self.embedding_service = BGEEmbeddingService(model_name=settings.EMBEDDING_MODEL_NAME)
         self.vector_store = ChromaVectorStore()
         self.document_repository = DocumentRepository()
@@ -65,6 +70,9 @@ class IngestionPipeline:
         title = re.sub(r"\s+", " ", match.group("title")).strip()
         return title or None
 
+    def _is_user_upload(self, document: DocumentModel) -> bool:
+        return document.source_type == SOURCE_TYPE_USER_UPLOAD
+
     async def run(
         self,
         document: DocumentModel,
@@ -86,17 +94,20 @@ class IngestionPipeline:
                 )
 
             markdown_path = document.markdown_storage_path or self._build_markdown_path(document)
-            markdown_path = self.converter.convert_to_markdown(
-                document.raw_storage_path,
-                markdown_path,
-                cleanup_profile=cleanup_profile,
-                engine=engine,
-            )
+            if self._is_user_upload(document):
+                markdown_path = self.user_upload_converter.convert_to_markdown(document.raw_storage_path, markdown_path)
+            else:
+                markdown_path = self.system_converter.convert_to_markdown(
+                    document.raw_storage_path,
+                    markdown_path,
+                    cleanup_profile=cleanup_profile,
+                    engine=engine,
+                )
             await self.document_repository.update_markdown_path(document.id, markdown_path)
 
             with open(markdown_path, "r", encoding="utf-8") as f:
                 markdown_text = f.read()
-            procedure_title = self._extract_procedure_title(markdown_text)
+            procedure_title = None if self._is_user_upload(document) else self._extract_procedure_title(markdown_text)
 
             if job_id:
                 await self.ingestion_job_repository.update_job_status(
@@ -115,7 +126,10 @@ class IngestionPipeline:
                 "procedure_title": procedure_title,
                 "visibility": document.visibility,
             }
-            chunks = self.chunker.chunk(markdown_text, base_metadata)
+            if self._is_user_upload(document):
+                chunks = self.user_upload_chunker.chunk(markdown_text, base_metadata)
+            else:
+                chunks = self.system_chunker.chunk(markdown_text, base_metadata)
             chunk_docs: list[dict] = []
             embeddings: list[list[float]] = []
             for chunk in chunks:

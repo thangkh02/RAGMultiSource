@@ -9,8 +9,10 @@ from app.core.constants import (
     INGESTION_JOB_STATUS_RUNNING,
     INGESTION_JOB_STATUS_SUCCEEDED,
     INGESTION_JOB_STEP_CONVERT_TO_MARKDOWN,
+    SOURCE_TYPE_USER_UPLOAD,
 )
 from app.rag.converter.markitdown_converter import MarkItDownMarkdownConverter
+from app.rag.converter.user_upload_converter import UserUploadMarkdownConverter
 from app.repositories.document_repository import DocumentRepository
 from app.repositories.ingestion_job_repository import IngestionJobRepository
 
@@ -19,7 +21,8 @@ class MarkItDownConversionService:
     def __init__(self) -> None:
         self.document_repository = DocumentRepository()
         self.ingestion_job_repository = IngestionJobRepository()
-        self.converter = MarkItDownMarkdownConverter()
+        self.system_converter = MarkItDownMarkdownConverter()
+        self.user_upload_converter = UserUploadMarkdownConverter()
 
     def _backend_root(self) -> Path:
         return Path(__file__).resolve().parents[2]
@@ -75,7 +78,10 @@ class MarkItDownConversionService:
                     progress=25,
                 )
 
-            converted_path = self.converter.convert_to_markdown(str(resolved_raw_path), str(resolved_markdown_path))
+            if document.get("source_type") == SOURCE_TYPE_USER_UPLOAD:
+                converted_path = self.user_upload_converter.convert_to_markdown(str(resolved_raw_path), str(resolved_markdown_path))
+            else:
+                converted_path = self.system_converter.convert_to_markdown(str(resolved_raw_path), str(resolved_markdown_path))
             await self.document_repository.update_markdown_path(document_id, markdown_path)
             await self.document_repository.update_document_status(document_id, DOCUMENT_STATUS_CONVERTED)
 

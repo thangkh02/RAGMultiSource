@@ -17,7 +17,6 @@ from app.models.ingestion_job import IngestionJobModel
 from app.repositories.document_repository import DocumentRepository
 from app.repositories.ingestion_job_repository import IngestionJobRepository
 from app.repositories.chunk_repository import ChunkRepository
-from app.rag.pipeline.ingestion_pipeline import IngestionPipeline
 from app.utils.file_utils import save_upload_file
 from app.utils.id_utils import generate_id
 
@@ -29,7 +28,6 @@ class DocumentService:
         self.document_repository = DocumentRepository()
         self.ingestion_job_repository = IngestionJobRepository()
         self.chunk_repository = ChunkRepository()
-        self.ingestion_pipeline = IngestionPipeline()
 
     def _validate_document_type(self, file: UploadFile) -> str:
         filename = Path(file.filename or "").name
@@ -81,8 +79,8 @@ class DocumentService:
                 "visibility": VISIBILITY_PRIVATE,
                 "uploaded_in_session_id": session_id,
                 "raw_storage_path": raw_path_str,
-                "cleanup_profile": "default",
-                "engine": "markitdown",
+                "cleanup_profile": "none",
+                "engine": "user_upload",
             },
         )
         job_id = await self.ingestion_job_repository.create_job(ingestion_job)
