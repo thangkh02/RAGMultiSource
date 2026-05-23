@@ -13,7 +13,20 @@ def _load_cases() -> list[dict]:
 
 def _assert_metadata_contains(actual: dict, expected: dict) -> None:
     for key, value in expected.items():
-        assert actual.get(key) == value
+        assert _filter_value(actual, key) == value
+
+
+def _filter_value(metadata_filter: dict, key: str):
+    if key in metadata_filter:
+        return metadata_filter[key]
+    for operator in ("$and", "$or"):
+        nested_filters = metadata_filter.get(operator)
+        if isinstance(nested_filters, list):
+            for item in nested_filters:
+                value = _filter_value(item, key)
+                if value is not None:
+                    return value
+    return None
 
 
 def test_scope_resolver_json_cases():

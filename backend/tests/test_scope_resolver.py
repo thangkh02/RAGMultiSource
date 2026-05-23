@@ -10,6 +10,19 @@ from app.core.constants import (
 from app.rag.retrieval.resolvers import ScopeResolver
 
 
+def _filter_value(metadata_filter: dict, key: str):
+    if key in metadata_filter:
+        return metadata_filter[key]
+    for operator in ("$and", "$or"):
+        nested_filters = metadata_filter.get(operator)
+        if isinstance(nested_filters, list):
+            for item in nested_filters:
+                value = _filter_value(item, key)
+                if value is not None:
+                    return value
+    return None
+
+
 def test_resolve_system_procedure_scope():
     resolver = ScopeResolver()
 
@@ -20,9 +33,9 @@ def test_resolve_system_procedure_scope():
 
     assert resolution.scope == RETRIEVAL_SCOPE_SYSTEM_PROCEDURE
     assert resolution.should_retrieve is True
-    assert resolution.metadata_filter["source_type"] == "system"
-    assert resolution.metadata_filter["visibility"] == "global"
-    assert resolution.metadata_filter["procedure_title"]
+    assert _filter_value(resolution.metadata_filter, "source_type") == "system"
+    assert _filter_value(resolution.metadata_filter, "visibility") == "global"
+    assert _filter_value(resolution.metadata_filter, "procedure_title")
 
 
 def test_resolve_current_session_upload_scope():
@@ -35,9 +48,9 @@ def test_resolve_current_session_upload_scope():
     )
 
     assert resolution.scope == RETRIEVAL_SCOPE_CURRENT_SESSION_UPLOADS
-    assert resolution.metadata_filter["source_type"] == "user_upload"
-    assert resolution.metadata_filter["owner_user_id"] == "user_1"
-    assert resolution.metadata_filter["session_id"] == "session_1"
+    assert _filter_value(resolution.metadata_filter, "source_type") == "user_upload"
+    assert _filter_value(resolution.metadata_filter, "owner_user_id") == "user_1"
+    assert _filter_value(resolution.metadata_filter, "session_id") == "session_1"
 
 
 def test_resolve_file_name_scope():
@@ -49,9 +62,9 @@ def test_resolve_file_name_scope():
     )
 
     assert resolution.scope == RETRIEVAL_SCOPE_USER_FILE_NAME
-    assert resolution.metadata_filter["source_type"] == "user_upload"
-    assert resolution.metadata_filter["owner_user_id"] == "user_1"
-    assert resolution.metadata_filter["filename"] == "hoc_phi_2024.pdf"
+    assert _filter_value(resolution.metadata_filter, "source_type") == "user_upload"
+    assert _filter_value(resolution.metadata_filter, "owner_user_id") == "user_1"
+    assert _filter_value(resolution.metadata_filter, "filename") == "hoc_phi_2024.pdf"
 
 
 def test_resolve_user_all_uploads_scope():
@@ -63,8 +76,8 @@ def test_resolve_user_all_uploads_scope():
     )
 
     assert resolution.scope == RETRIEVAL_SCOPE_USER_ALL_UPLOADS
-    assert resolution.metadata_filter["source_type"] == "user_upload"
-    assert resolution.metadata_filter["owner_user_id"] == "user_1"
+    assert _filter_value(resolution.metadata_filter, "source_type") == "user_upload"
+    assert _filter_value(resolution.metadata_filter, "owner_user_id") == "user_1"
 
 
 def test_resolve_compare_scope():
@@ -123,6 +136,6 @@ def test_resolve_follow_up_uses_last_filename():
     )
 
     assert resolution.scope == RETRIEVAL_SCOPE_USER_FILE_NAME
-    assert resolution.metadata_filter["source_type"] == "user_upload"
-    assert resolution.metadata_filter["owner_user_id"] == "user_1"
-    assert resolution.metadata_filter["filename"] == "hoc_phi_2024.pdf"
+    assert _filter_value(resolution.metadata_filter, "source_type") == "user_upload"
+    assert _filter_value(resolution.metadata_filter, "owner_user_id") == "user_1"
+    assert _filter_value(resolution.metadata_filter, "filename") == "hoc_phi_2024.pdf"

@@ -35,15 +35,26 @@ class RetrievalPlan:
 
 
 class RetrievalStrategy:
+    def _filter_has_value(self, metadata_filter: dict[str, Any], key: str, value: Any) -> bool:
+        if not isinstance(metadata_filter, dict):
+            return False
+        if metadata_filter.get(key) == value:
+            return True
+        for operator in ("$and", "$or"):
+            nested_filters = metadata_filter.get(operator)
+            if isinstance(nested_filters, list):
+                return any(self._filter_has_value(item, key, value) for item in nested_filters)
+        return False
+
     def _split_hybrid_filter(self, metadata_filter: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
         filters = metadata_filter.get("$or") if isinstance(metadata_filter, dict) else None
         system_filter = {"source_type": SOURCE_TYPE_SYSTEM}
         user_filter = {"source_type": SOURCE_TYPE_USER_UPLOAD}
         if isinstance(filters, list):
             for item in filters:
-                if item.get("source_type") == SOURCE_TYPE_SYSTEM:
+                if self._filter_has_value(item, "source_type", SOURCE_TYPE_SYSTEM):
                     system_filter = item
-                elif item.get("source_type") == SOURCE_TYPE_USER_UPLOAD:
+                elif self._filter_has_value(item, "source_type", SOURCE_TYPE_USER_UPLOAD):
                     user_filter = item
         return system_filter, user_filter
 

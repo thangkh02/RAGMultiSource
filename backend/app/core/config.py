@@ -6,7 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8-sig", extra="ignore")
 
     MONGODB_URI: str = "mongodb://mongodb:27017"
     MONGODB_DB_NAME: str = "rag_chatbot"
@@ -16,6 +16,13 @@ class Settings(BaseSettings):
     OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL: str = "gpt-4o-mini"
+    LLM_PROVIDER: str = "openai"
+    OPENROUTER_API_KEY: str = ""
+    OPENROUTER_MODEL: str = "openai/gpt-4o-mini"
+    OPENROUTER_QUERY_REWRITE_MODEL: str = "google/gemini-3.1-flash-lite-preview"
+    OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
+    OPENROUTER_SITE_URL: str = ""
+    OPENROUTER_APP_NAME: str = "RAG Chatbot"
     LANGSMITH_TRACING: str = "false"
     LANGSMITH_ENDPOINT: str = "https://api.smith.langchain.com"
     LANGSMITH_API_KEY: str = ""

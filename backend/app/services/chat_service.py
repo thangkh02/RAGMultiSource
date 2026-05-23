@@ -23,6 +23,15 @@ class ChatService:
             if session is None:
                 raise ValueError("Session not found.")
         conversation_state = self.conversation_state_manager.load(session, user_id, request.session_id)
+        if request.session_id:
+            recent_messages = await self.message_repository.list_session_messages(request.session_id)
+            conversation_state["recent_chat_history"] = [
+                {
+                    "role": message.get("role"),
+                    "content": message.get("content", ""),
+                }
+                for message in recent_messages[-8:]
+            ]
         result = await self.qa_pipeline.run(
             question=request.question,
             user_id=user_id,

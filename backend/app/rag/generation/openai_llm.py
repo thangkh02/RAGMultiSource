@@ -18,7 +18,22 @@ class OpenAILLMService:
         )
         self.llm = None
         self.chain = None
-        if settings.OPENAI_API_KEY:
+        provider = settings.LLM_PROVIDER.strip().lower()
+        if provider == "openrouter" and settings.OPENROUTER_API_KEY:
+            default_headers = {}
+            if settings.OPENROUTER_SITE_URL:
+                default_headers["HTTP-Referer"] = settings.OPENROUTER_SITE_URL
+            if settings.OPENROUTER_APP_NAME:
+                default_headers["X-Title"] = settings.OPENROUTER_APP_NAME
+            self.llm = ChatOpenAI(
+                model=settings.OPENROUTER_MODEL,
+                api_key=settings.OPENROUTER_API_KEY,
+                base_url=settings.OPENROUTER_BASE_URL,
+                temperature=0,
+                default_headers=default_headers or None,
+            )
+            self.chain = self.prompt | self.llm | StrOutputParser()
+        elif settings.OPENAI_API_KEY:
             self.llm = ChatOpenAI(
                 model=settings.OPENAI_MODEL,
                 api_key=settings.OPENAI_API_KEY,

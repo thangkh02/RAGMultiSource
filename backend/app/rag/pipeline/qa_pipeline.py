@@ -1,7 +1,8 @@
 from app.core.constants import RETRIEVAL_SCOPE_AUTO, RETRIEVAL_SCOPE_NEED_CLARIFICATION
 from app.rag.generation.openai_llm import OpenAILLMService
 from app.rag.generation.source_formatter import SourceFormatter
-from app.rag.query import IntentRouter, QueryRewriter
+from app.rag.query import IntentRouter
+from app.rag.rewrite import QueryRewriter
 from app.rag.retrieval.context_validator import FALLBACK_NO_CONTEXT, ContextValidator
 from app.rag.retrieval.resolvers import DocumentResolver, ScopeResolver
 from app.rag.retrieval.retriever import Retriever
@@ -45,8 +46,14 @@ class QAPipeline:
     ) -> dict:
         conversation_state = conversation_state or {}
         intent_resolution = self.intent_router.route(question=question, conversation_state=conversation_state)
-        resolution = self.scope_resolver.resolve(
+        query_rewrite = self.query_rewriter.rewrite_after_intent(
             question=question,
+            intent_resolution=intent_resolution.model_dump(),
+            conversation_state=conversation_state,
+        )
+        routing_question = query_rewrite.rewritten_question
+        resolution = self.scope_resolver.resolve(
+            question=routing_question,
             user_id=user_id,
             session_id=session_id,
             scope=scope if scope != RETRIEVAL_SCOPE_AUTO else RETRIEVAL_SCOPE_AUTO,
@@ -61,13 +68,6 @@ class QAPipeline:
             detected_filename=resolution.detected_filename,
             detected_procedure_title=resolution.detected_procedure_title,
             selected_document_ids=selected_document_ids,
-            conversation_state=conversation_state,
-        )
-        query_rewrite = self.query_rewriter.rewrite(
-            question=question,
-            intent_resolution=intent_resolution.model_dump(),
-            scope_resolution=resolution.model_dump(),
-            document_resolution=document_resolution.model_dump(),
             conversation_state=conversation_state,
         )
         retrieval_plan = self.retrieval_strategy.plan(

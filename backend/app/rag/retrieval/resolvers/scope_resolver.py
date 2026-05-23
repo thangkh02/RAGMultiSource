@@ -171,6 +171,7 @@ class ScopeResolver:
         if not match:
             return None
         filename = _strip_quotes(match.group("filename"))
+        filename = re.sub(r"(?i)^.*\b(?:file|tai\s+lieu|document)\s+", "", filename)
         filename = re.sub(r"\s+", " ", filename).strip()
         return filename or None
 
@@ -225,24 +226,42 @@ class ScopeResolver:
         selected_document_ids = [doc_id for doc_id in selected_document_ids if doc_id]
 
         if scope == RETRIEVAL_SCOPE_SYSTEM_PROCEDURE:
-            base: dict[str, Any] = {"source_type": SOURCE_TYPE_SYSTEM, "visibility": VISIBILITY_GLOBAL}
+            conditions: list[dict[str, Any]] = [
+                {"source_type": SOURCE_TYPE_SYSTEM},
+                {"visibility": VISIBILITY_GLOBAL},
+            ]
             if detected_procedure_title:
-                base["procedure_title"] = detected_procedure_title
+                conditions.append({"procedure_title": detected_procedure_title})
+            base: dict[str, Any] = _and(*conditions)
         elif scope in {RETRIEVAL_SCOPE_CURRENT_SESSION_UPLOADS, RETRIEVAL_SCOPE_CURRENT_UPLOAD}:
-            base = {"source_type": SOURCE_TYPE_USER_UPLOAD, "owner_user_id": user_id}
+            conditions = [
+                {"source_type": SOURCE_TYPE_USER_UPLOAD},
+                {"owner_user_id": user_id},
+            ]
             if session_id:
-                base["session_id"] = session_id
+                conditions.append({"session_id": session_id})
+            base = _and(*conditions)
         elif scope in {RETRIEVAL_SCOPE_ALL_USER_UPLOADS, RETRIEVAL_SCOPE_USER_ALL_UPLOADS}:
-            base = {"source_type": SOURCE_TYPE_USER_UPLOAD, "owner_user_id": user_id}
+            base = _and({"source_type": SOURCE_TYPE_USER_UPLOAD}, {"owner_user_id": user_id})
         elif scope == RETRIEVAL_SCOPE_USER_FILE_NAME:
-            base = {"source_type": SOURCE_TYPE_USER_UPLOAD, "owner_user_id": user_id}
+            conditions = [
+                {"source_type": SOURCE_TYPE_USER_UPLOAD},
+                {"owner_user_id": user_id},
+            ]
             if detected_filename:
-                base["filename"] = detected_filename
+                conditions.append({"filename": detected_filename})
+            base = _and(*conditions)
         elif scope == RETRIEVAL_SCOPE_SYSTEM_DOCS:
-            base = {"source_type": SOURCE_TYPE_SYSTEM, "visibility": VISIBILITY_GLOBAL}
+            base = _and({"source_type": SOURCE_TYPE_SYSTEM}, {"visibility": VISIBILITY_GLOBAL})
         elif scope in {RETRIEVAL_SCOPE_HYBRID_SYSTEM_AND_USER, RETRIEVAL_SCOPE_MIXED}:
-            system_filter = {"source_type": SOURCE_TYPE_SYSTEM, "visibility": VISIBILITY_GLOBAL}
-            user_filter = {"source_type": SOURCE_TYPE_USER_UPLOAD, "owner_user_id": user_id}
+            system_conditions = [{"source_type": SOURCE_TYPE_SYSTEM}, {"visibility": VISIBILITY_GLOBAL}]
+            user_conditions = [{"source_type": SOURCE_TYPE_USER_UPLOAD}, {"owner_user_id": user_id}]
+            if detected_procedure_title:
+                system_conditions.append({"procedure_title": detected_procedure_title})
+            if detected_filename:
+                user_conditions.append({"filename": detected_filename})
+            system_filter = _and(*system_conditions)
+            user_filter = _and(*user_conditions)
             base = _or(system_filter, user_filter)
         elif scope in {RETRIEVAL_SCOPE_GENERAL_QUERY, RETRIEVAL_SCOPE_NEED_CLARIFICATION}:
             base = {}
@@ -296,15 +315,15 @@ class ScopeResolver:
                 reason="explicit scope provided by request",
             )
 
-        if detected_filename:
+        if self._contains_any(normalized_question, self._compare_patterns):
+            scope_name = RETRIEVAL_SCOPE_HYBRID_SYSTEM_AND_USER
+            matched_rules.append("compare_query")
+        elif detected_filename:
             scope_name = RETRIEVAL_SCOPE_USER_FILE_NAME
             matched_rules.append("detected_filename")
         elif detected_procedure_title:
             scope_name = RETRIEVAL_SCOPE_SYSTEM_PROCEDURE
             matched_rules.append("detected_procedure_title")
-        elif self._contains_any(normalized_question, self._compare_patterns):
-            scope_name = RETRIEVAL_SCOPE_HYBRID_SYSTEM_AND_USER
-            matched_rules.append("compare_query")
         elif self._contains_any(normalized_question, self._current_upload_patterns):
             scope_name = RETRIEVAL_SCOPE_CURRENT_SESSION_UPLOADS
             matched_rules.append("current_session_upload")

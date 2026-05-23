@@ -6,14 +6,20 @@
       "intent": "follow_up",
       "is_follow_up": true
     },
-    "scope_resolution": {
-      "detected_procedure_title": null
-    },
-    "document_resolution": {
-      "resolved_documents": []
-    },
+    "scope_resolution": {},
+    "document_resolution": {},
     "conversation_state": {
-      "last_procedure_title": "Đăng ký thành lập doanh nghiệp tư nhân"
+      "last_procedure_title": "Đăng ký thành lập doanh nghiệp tư nhân",
+      "recent_chat_history": [
+        {
+          "role": "user",
+          "content": "Thủ tục đăng ký thành lập doanh nghiệp tư nhân cần hồ sơ gì?"
+        },
+        {
+          "role": "assistant",
+          "content": "Thủ tục này cần giấy đề nghị đăng ký doanh nghiệp và giấy tờ pháp lý."
+        }
+      ]
     },
     "expected_was_rewritten": true,
     "expected_contains": "Đăng ký thành lập doanh nghiệp tư nhân"
@@ -26,11 +32,19 @@
       "is_follow_up": true
     },
     "scope_resolution": {},
-    "document_resolution": {
-      "resolved_documents": []
-    },
+    "document_resolution": {},
     "conversation_state": {
-      "last_filename": "hoc_phi_2024.pdf"
+      "last_filename": "hoc_phi_2024.pdf",
+      "recent_chat_history": [
+        {
+          "role": "user",
+          "content": "File hoc_phi_2024.pdf nói gì?"
+        },
+        {
+          "role": "assistant",
+          "content": "File nói về hồ sơ học phí."
+        }
+      ]
     },
     "expected_was_rewritten": true,
     "expected_contains": "hoc_phi_2024.pdf"
@@ -42,12 +56,8 @@
       "intent": "ask_question",
       "is_follow_up": false
     },
-    "scope_resolution": {
-      "detected_procedure_title": "Đăng ký thành lập doanh nghiệp tư nhân"
-    },
-    "document_resolution": {
-      "resolved_documents": []
-    },
+    "scope_resolution": {},
+    "document_resolution": {},
     "conversation_state": {},
     "expected_was_rewritten": false,
     "expected_rewritten_question": "Thủ tục đăng ký thành lập doanh nghiệp tư nhân cần hồ sơ gì?"

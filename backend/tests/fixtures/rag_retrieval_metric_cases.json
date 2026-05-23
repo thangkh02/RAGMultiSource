@@ -1,0 +1,89 @@
+[
+  {
+    "id": "system_procedure_fee_and_deadline",
+    "question": "Dang ky thanh lap doanh nghiep tu nhan le phi va thoi han bao lau?",
+    "top_k": 3,
+    "metadata_filter": {
+      "$and": [
+        {
+          "source_type": "system"
+        },
+        {
+          "visibility": "global"
+        },
+        {
+          "procedure_title": "Dang ky thanh lap doanh nghiep tu nhan"
+        }
+      ]
+    },
+    "expected_chunk_ids": [
+      "rag_it_metrics_sys_fee",
+      "rag_it_metrics_sys_deadline"
+    ],
+    "blocked_chunk_ids": [
+      "rag_it_metrics_other_user_leak",
+      "rag_it_metrics_user_current_fee",
+      "rag_it_metrics_user_old_deadline"
+    ],
+    "min_precision": 0.66,
+    "min_recall": 1.0,
+    "min_mrr": 1.0
+  },
+  {
+    "id": "current_session_upload_fee_and_deadline",
+    "question": "File vua upload Alpha noi gi ve le phi va thoi han?",
+    "top_k": 5,
+    "metadata_filter": {
+      "$and": [
+        {
+          "source_type": "user_upload"
+        },
+        {
+          "owner_user_id": "rag_it_metrics_user_a"
+        },
+        {
+          "session_id": "rag_it_metrics_session_current"
+        }
+      ]
+    },
+    "expected_chunk_ids": [
+      "rag_it_metrics_user_current_fee",
+      "rag_it_metrics_user_current_deadline"
+    ],
+    "blocked_chunk_ids": [
+      "rag_it_metrics_other_user_leak",
+      "rag_it_metrics_user_old_deadline",
+      "rag_it_metrics_sys_fee"
+    ],
+    "min_precision": 1.0,
+    "min_recall": 1.0,
+    "min_mrr": 1.0
+  },
+  {
+    "id": "user_all_uploads_all_owned_evidence",
+    "question": "Tai lieu da upload cua toi noi gi ve le phi va thoi han?",
+    "top_k": 6,
+    "metadata_filter": {
+      "$and": [
+        {
+          "source_type": "user_upload"
+        },
+        {
+          "owner_user_id": "rag_it_metrics_user_a"
+        }
+      ]
+    },
+    "expected_chunk_ids": [
+      "rag_it_metrics_user_current_fee",
+      "rag_it_metrics_user_current_deadline",
+      "rag_it_metrics_user_old_deadline"
+    ],
+    "blocked_chunk_ids": [
+      "rag_it_metrics_other_user_leak",
+      "rag_it_metrics_sys_fee"
+    ],
+    "min_precision": 1.0,
+    "min_recall": 1.0,
+    "min_mrr": 1.0
+  }
+]

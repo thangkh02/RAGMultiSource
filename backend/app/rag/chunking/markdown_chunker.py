@@ -1,18 +1,16 @@
 import re
 
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-
 from app.rag.chunking.chunk_utils import extract_heading
+from app.rag.chunking.simple_text_splitter import SimpleTextSplitter
 from app.utils.text_utils import count_tokens_rough
 
 
 class MarkdownChunker:
     def __init__(self, chunk_size: int = 5000, chunk_overlap: int = 500) -> None:
-        self.splitter = RecursiveCharacterTextSplitter(
+        self.splitter = SimpleTextSplitter(
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
             separators=["\n\n## ", "\n\n", "\n- ", "\n", ".", " ", ""],
-            keep_separator=False,
         )
 
     def _normalize_markdown_chunk(self, text: str) -> str:

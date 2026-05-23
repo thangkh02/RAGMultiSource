@@ -1,0 +1,76 @@
+[
+  {
+    "id": "filename_scope_beats_system_noise",
+    "question": "Dung lay tai lieu he thong, chi doc file ho_so_alpha.pdf va cho toi ca le phi voi thoi han",
+    "conversation_state": {},
+    "expected_scope": "user_file_name",
+    "expected_mode": "default",
+    "expected_chunk_ids": [
+      "rag_it_metrics_user_current_fee",
+      "rag_it_metrics_user_current_deadline"
+    ],
+    "blocked_chunk_ids": [
+      "rag_it_metrics_sys_fee",
+      "rag_it_metrics_sys_deadline",
+      "rag_it_metrics_user_old_deadline",
+      "rag_it_metrics_other_user_leak"
+    ],
+    "min_precision": 1.0,
+    "min_recall": 1.0,
+    "min_mrr": 1.0
+  },
+  {
+    "id": "follow_up_uses_last_current_session_scope",
+    "question": "con le phi va thoi han thi sao?",
+    "conversation_state": {
+      "last_scope": "current_session_uploads",
+      "current_session_docs": [
+        "rag_it_metrics_user_current_doc"
+      ],
+      "last_document_ids": [
+        "rag_it_metrics_user_current_doc"
+      ],
+      "last_sources": [
+        "user_upload"
+      ]
+    },
+    "expected_scope": "current_session_uploads",
+    "expected_mode": "default",
+    "expected_chunk_ids": [
+      "rag_it_metrics_user_current_fee",
+      "rag_it_metrics_user_current_deadline"
+    ],
+    "blocked_chunk_ids": [
+      "rag_it_metrics_sys_fee",
+      "rag_it_metrics_user_old_deadline",
+      "rag_it_metrics_other_user_leak"
+    ],
+    "min_precision": 1.0,
+    "min_recall": 1.0,
+    "min_mrr": 1.0
+  },
+  {
+    "id": "hybrid_compare_keeps_system_and_named_user_file_separate",
+    "question": "So sanh tai lieu he thong voi file ho_so_alpha.pdf ve le phi va thoi han, dung lay file cua nguoi khac",
+    "conversation_state": {},
+    "expected_scope": "hybrid_system_and_user",
+    "expected_mode": "hybrid_compare",
+    "expected_branch_names": [
+      "system_chunks",
+      "user_upload_chunks"
+    ],
+    "expected_chunk_ids": [
+      "rag_it_metrics_sys_fee",
+      "rag_it_metrics_sys_deadline",
+      "rag_it_metrics_user_current_fee",
+      "rag_it_metrics_user_current_deadline"
+    ],
+    "blocked_chunk_ids": [
+      "rag_it_metrics_user_old_deadline",
+      "rag_it_metrics_other_user_leak"
+    ],
+    "min_precision": 1.0,
+    "min_recall": 1.0,
+    "min_mrr": 1.0
+  }
+]

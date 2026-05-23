@@ -1,17 +1,15 @@
 import re
 
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-
+from app.rag.chunking.simple_text_splitter import SimpleTextSplitter
 from app.utils.text_utils import count_tokens_rough
 
 
 class UserUploadChunker:
     def __init__(self, chunk_size: int = 1800, chunk_overlap: int = 220) -> None:
-        self.splitter = RecursiveCharacterTextSplitter(
+        self.splitter = SimpleTextSplitter(
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
             separators=["\n\n", "\n", ". ", " ", ""],
-            keep_separator=False,
         )
 
     def _normalize_text(self, text: str) -> str:
