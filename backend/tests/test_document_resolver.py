@@ -10,6 +10,32 @@ from app.rag.retrieval.resolvers import ConversationStateManager, DocumentResolv
 
 
 class FakeDocumentRepository:
+    async def get_document_by_id(self, document_id: str):
+        documents = {
+            "doc_1": {
+                "_id": "doc_1",
+                "filename": "hoc_phi.pdf",
+                "source_type": "user_upload",
+                "owner_user_id": "user_1",
+                "uploaded_in_session_id": "sess_1",
+            },
+            "doc_other": {
+                "_id": "doc_other",
+                "filename": "other.pdf",
+                "source_type": "user_upload",
+                "owner_user_id": "other_user",
+                "uploaded_in_session_id": "sess_1",
+            },
+            "sysdoc_1": {
+                "_id": "sysdoc_1",
+                "filename": "system.docx",
+                "source_type": "system",
+                "visibility": "global",
+                "procedure_title": "Procedure A",
+            },
+        }
+        return documents.get(document_id)
+
     async def find_system_documents_by_procedure_title(self, procedure_title: str):
         return [
             {
@@ -90,6 +116,39 @@ def test_document_resolver_filters_user_file_by_filename():
 
     assert resolution.selected_document_ids == ["doc_1"]
     assert resolution.metadata_filter["$and"][1] == {"document_id": {"$in": ["doc_1"]}}
+
+
+def test_document_resolver_authorizes_selected_document_ids():
+    resolver = DocumentResolver(FakeDocumentRepository())
+
+    resolution = asyncio.run(
+        resolver.resolve(
+            scope=RETRIEVAL_SCOPE_USER_FILE_NAME,
+            metadata_filter={"source_type": "user_upload", "owner_user_id": "user_1"},
+            user_id="user_1",
+            selected_document_ids=["doc_1", "doc_other"],
+        )
+    )
+
+    assert resolution.selected_document_ids == ["doc_1"]
+    assert resolution.metadata_filter["$and"][1] == {"document_id": {"$in": ["doc_1"]}}
+
+
+def test_document_resolver_rejects_selected_current_session_doc_from_other_session():
+    resolver = DocumentResolver(FakeDocumentRepository())
+
+    resolution = asyncio.run(
+        resolver.resolve(
+            scope=RETRIEVAL_SCOPE_CURRENT_SESSION_UPLOADS,
+            metadata_filter={"source_type": "user_upload", "owner_user_id": "user_1", "session_id": "sess_2"},
+            user_id="user_1",
+            session_id="sess_2",
+            selected_document_ids=["doc_1"],
+        )
+    )
+
+    assert resolution.selected_document_ids == []
+    assert resolution.needs_clarification is True
 
 
 def test_document_resolver_uses_current_session_uploads():

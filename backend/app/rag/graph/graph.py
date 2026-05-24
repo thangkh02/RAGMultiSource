@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from langgraph.graph import END, StateGraph
+from langsmith import traceable
 
 from app.rag.graph.nodes import RAGGraphNodes
 from app.rag.graph.state import RAGState
@@ -96,5 +97,6 @@ class RAGGraphRunner:
         graph.add_edge("update_state", END)
         return graph
 
+    @traceable(name="rag_langgraph_run")
     async def run(self, initial_state: RAGState) -> RAGState:
         return await self.graph.ainvoke(initial_state)

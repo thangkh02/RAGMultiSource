@@ -6,9 +6,13 @@ from typing import Any
 from app.core.constants import (
     RETRIEVAL_SCOPE_CURRENT_SESSION_UPLOADS,
     RETRIEVAL_SCOPE_CURRENT_UPLOAD,
+    RETRIEVAL_SCOPE_HYBRID_SYSTEM_AND_USER,
     RETRIEVAL_SCOPE_SYSTEM_PROCEDURE,
     RETRIEVAL_SCOPE_USER_ALL_UPLOADS,
     RETRIEVAL_SCOPE_USER_FILE_NAME,
+    SOURCE_TYPE_SYSTEM,
+    SOURCE_TYPE_USER_UPLOAD,
+    VISIBILITY_GLOBAL,
 )
 from app.repositories.document_repository import DocumentRepository
 
@@ -62,6 +66,43 @@ class DocumentResolver:
             for doc in documents
         ]
 
+    def _is_authorized_selected_document(
+        self,
+        document: dict[str, Any],
+        scope: str,
+        user_id: str,
+        session_id: str | None,
+    ) -> bool:
+        source_type = document.get("source_type")
+        if source_type == SOURCE_TYPE_SYSTEM:
+            return document.get("visibility") == VISIBILITY_GLOBAL
+
+        if source_type != SOURCE_TYPE_USER_UPLOAD or document.get("owner_user_id") != user_id:
+            return False
+
+        if scope in {RETRIEVAL_SCOPE_CURRENT_SESSION_UPLOADS, RETRIEVAL_SCOPE_CURRENT_UPLOAD}:
+            return bool(session_id) and document.get("uploaded_in_session_id") == session_id
+
+        return scope in {
+            RETRIEVAL_SCOPE_USER_ALL_UPLOADS,
+            RETRIEVAL_SCOPE_USER_FILE_NAME,
+            RETRIEVAL_SCOPE_HYBRID_SYSTEM_AND_USER,
+        }
+
+    async def _resolve_selected_documents(
+        self,
+        scope: str,
+        user_id: str,
+        session_id: str | None,
+        selected_document_ids: list[str],
+    ) -> list[dict[str, Any]]:
+        documents: list[dict[str, Any]] = []
+        for document_id in dict.fromkeys([doc_id for doc_id in selected_document_ids if doc_id]):
+            document = await self.document_repository.get_document_by_id(document_id)
+            if document and self._is_authorized_selected_document(document, scope, user_id, session_id):
+                documents.append(document)
+        return documents
+
     async def resolve(
         self,
         scope: str,
@@ -77,10 +118,14 @@ class DocumentResolver:
         selected_document_ids = selected_document_ids or []
 
         if selected_document_ids:
+            documents = await self._resolve_selected_documents(scope, user_id, session_id, selected_document_ids)
+            authorized_document_ids = [doc["_id"] for doc in documents if doc.get("_id")]
             return DocumentResolution(
-                metadata_filter=self._with_document_filter(metadata_filter, selected_document_ids),
-                selected_document_ids=selected_document_ids,
-                reason="explicit selected document ids",
+                metadata_filter=self._with_document_filter(metadata_filter, authorized_document_ids),
+                selected_document_ids=authorized_document_ids,
+                resolved_documents=self._serialize_docs(documents),
+                needs_clarification=not authorized_document_ids,
+                reason="explicit selected document ids after authorization check",
             )
 
         if scope == RETRIEVAL_SCOPE_SYSTEM_PROCEDURE and detected_procedure_title:

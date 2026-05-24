@@ -5,6 +5,8 @@ import unicodedata
 from dataclasses import asdict, dataclass
 from typing import Any
 
+from langsmith import traceable
+
 from app.core.constants import (
     RETRIEVAL_SCOPE_AUTO,
     RETRIEVAL_SCOPE_CURRENT_SESSION_UPLOADS,
@@ -173,6 +175,7 @@ class RAGGraphNodes:
         runtime_state = (state or {}).get("runtime_context") or {}
         return runtime_state.get("last_scope") or self._last_context(state or {}).get("scope") or RETRIEVAL_SCOPE_AUTO
 
+    @traceable(name="rag_load_context_node")
     def load_context_node(self, state: dict[str, Any]) -> dict[str, Any]:
         runtime_context = dict(state.get("runtime_context") or {})
         runtime_context["current_user_id"] = state["user_id"]
@@ -184,6 +187,7 @@ class RAGGraphNodes:
             "selected_document_ids": state.get("selected_document_ids") or [],
         }
 
+    @traceable(name="rag_rewrite_detector_node")
     def rewrite_detector_node(self, state: dict[str, Any]) -> dict[str, Any]:
         decision = self.pipeline.rewrite_gate.decide(
             original_query=state["original_query"],
@@ -191,6 +195,7 @@ class RAGGraphNodes:
         )
         return {"rewrite_gate": decision.model_dump()}
 
+    @traceable(name="rag_rewrite_query_node")
     def rewrite_query_node(self, state: dict[str, Any]) -> dict[str, Any]:
         rewrite = self.pipeline.query_rewriter.rewrite_standalone(
             question=state["original_query"],
@@ -205,6 +210,7 @@ class RAGGraphNodes:
             "was_rewritten": rewrite.was_rewritten,
         }
 
+    @traceable(name="rag_use_original_query_node")
     def use_original_query_node(self, state: dict[str, Any]) -> dict[str, Any]:
         rewrite = QueryRewrite(
             original_question=state["original_query"],
@@ -221,6 +227,7 @@ class RAGGraphNodes:
             "was_rewritten": False,
         }
 
+    @traceable(name="rag_intent_router_node")
     def intent_router_node(self, state: dict[str, Any]) -> dict[str, Any]:
         resolution = self.pipeline.intent_router.route(
             question=state["final_query"],
@@ -228,6 +235,7 @@ class RAGGraphNodes:
         )
         return {"intent_resolution": resolution.model_dump()}
 
+    @traceable(name="rag_retrieval_planner_node")
     def retrieval_planner_node(self, state: dict[str, Any]) -> dict[str, Any]:
         intent = state.get("intent_resolution") or {}
         final_query = state.get("final_query") or state.get("original_query") or ""
@@ -288,6 +296,7 @@ class RAGGraphNodes:
             reason="Reused last resolved context filter.",
         )
 
+    @traceable(name="rag_scope_resolver_node")
     def scope_resolver_node(self, state: dict[str, Any]) -> dict[str, Any]:
         structured_resolution = self.scope_analyzer.resolve(state)
         resolution = ScopeResolution(
@@ -315,6 +324,7 @@ class RAGGraphNodes:
             "retrieval_plan": retrieval_plan,
         }
 
+    @traceable(name="rag_document_resolver_node")
     async def document_resolver_node(self, state: dict[str, Any]) -> dict[str, Any]:
         scope_resolution = state.get("scope_resolution") or {}
         if state.get("planner_action") == ACTION_REUSE_LAST_FILTER or scope_resolution.get("should_reuse_last_filter"):
@@ -344,6 +354,7 @@ class RAGGraphNodes:
             "metadata_filter": resolution.metadata_filter,
         }
 
+    @traceable(name="rag_candidate_selector_node")
     def candidate_selector_node(self, state: dict[str, Any]) -> dict[str, Any]:
         candidates = state.get("document_candidates") or []
         document_resolution = dict(state.get("document_resolution") or {})
@@ -365,6 +376,7 @@ class RAGGraphNodes:
             )
         return {"candidate_selection": selection.model_dump()}
 
+    @traceable(name="rag_build_filter_node")
     def build_filter_node(self, state: dict[str, Any]) -> dict[str, Any]:
         scope_resolution = state.get("scope_resolution") or {}
         document_resolution = dict(state.get("document_resolution") or {})
@@ -397,6 +409,7 @@ class RAGGraphNodes:
         document_resolution["metadata_filter"] = metadata_filter
         return {"metadata_filter": metadata_filter, "document_resolution": document_resolution}
 
+    @traceable(name="rag_retrieval_strategy_node")
     def retrieval_strategy_node(self, state: dict[str, Any]) -> dict[str, Any]:
         scope_resolution = state.get("scope_resolution") or {}
         document_resolution = state.get("document_resolution") or {}
@@ -490,12 +503,14 @@ class RAGGraphNodes:
         sources = self._sources_from_contexts(contexts)
         return {"answer": self.source_formatter.format_answer(answer, sources), "sources": sources}
 
+    @traceable(name="rag_no_context_node")
     def no_context_node(self, state: dict[str, Any]) -> dict[str, Any]:
         answer = (state.get("context_validation") or {}).get("fallback_answer") or FALLBACK_NO_CONTEXT
         if state.get("mixed_branch_warnings"):
             answer = answer + "\n\n" + "\n".join(state["mixed_branch_warnings"])
         return {"answer": answer, "sources": []}
 
+    @traceable(name="rag_direct_answer_node")
     def direct_answer_node(self, state: dict[str, Any]) -> dict[str, Any]:
         return {
             "answer": "Mình là chatbot hỗ trợ hỏi đáp tài liệu hành chính. Bạn có thể hỏi về tài liệu hệ thống hoặc file bạn đã upload.",
@@ -504,6 +519,7 @@ class RAGGraphNodes:
             "context_validation": {"contexts": [], "should_answer": False, "fallback_answer": None, "warnings": [], "rejected_count": 0},
         }
 
+    @traceable(name="rag_clarification_node")
     def clarification_node(self, state: dict[str, Any]) -> dict[str, Any]:
         candidates = (state.get("candidate_selection") or {}).get("selected_documents") or state.get("document_candidates") or []
         if candidates:
@@ -518,6 +534,7 @@ class RAGGraphNodes:
             "context_validation": {"contexts": [], "should_answer": False, "fallback_answer": answer, "warnings": [], "rejected_count": 0},
         }
 
+    @traceable(name="rag_unsupported_node")
     def unsupported_node(self, state: dict[str, Any]) -> dict[str, Any]:
         return {
             "answer": "Mình chưa hỗ trợ yêu cầu này trong pipeline RAG hiện tại.",
@@ -526,6 +543,7 @@ class RAGGraphNodes:
             "context_validation": {"contexts": [], "should_answer": False, "fallback_answer": None, "warnings": [], "rejected_count": 0},
         }
 
+    @traceable(name="rag_update_state_node")
     def update_state_node(self, state: dict[str, Any]) -> dict[str, Any]:
         return {}
 
