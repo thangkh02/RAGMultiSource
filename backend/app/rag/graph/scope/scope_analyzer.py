@@ -7,14 +7,13 @@ import unicodedata
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-from langchain_core.output_parsers import StrOutputParser
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 
 from app.core.config import settings
 from app.core.constants import (
     RETRIEVAL_SCOPE_CURRENT_SESSION_UPLOADS,
-    RETRIEVAL_SCOPE_GENERAL_QUERY,
     RETRIEVAL_SCOPE_HYBRID_SYSTEM_AND_USER,
     RETRIEVAL_SCOPE_NEED_CLARIFICATION,
     RETRIEVAL_SCOPE_SYSTEM_DOCS,
@@ -27,14 +26,12 @@ from app.core.constants import (
 
 
 SCOPE_VALUES = {
-    RETRIEVAL_SCOPE_SYSTEM_DOCS,
-    RETRIEVAL_SCOPE_SYSTEM_PROCEDURE,
-    RETRIEVAL_SCOPE_CURRENT_SESSION_UPLOADS,
-    RETRIEVAL_SCOPE_USER_ALL_UPLOADS,
-    RETRIEVAL_SCOPE_USER_FILE_NAME,
-    RETRIEVAL_SCOPE_HYBRID_SYSTEM_AND_USER,
-    RETRIEVAL_SCOPE_GENERAL_QUERY,
-    RETRIEVAL_SCOPE_NEED_CLARIFICATION,
+    "system_only",
+    "current_uploads_only",
+    "past_uploads_only",
+    "user_uploads_all",
+    "mixed",
+    "need_clarification",
 }
 
 RESOLUTION_MODES = {
@@ -58,13 +55,26 @@ def _normalize_text(text: str) -> str:
     return re.sub(r"\s+", " ", stripped).strip()
 
 
+def _trim_to_last_complete_json_fragment(raw: str) -> str | None:
+    start = raw.find("{")
+    if start == -1:
+        return None
+
+    end = max(raw.rfind("}"), raw.rfind("]"))
+    if end < start:
+        return None
+
+    fragment = raw[start : end + 1]
+    if fragment.endswith("]"):
+        fragment += "}"
+    return fragment
+
+
 @dataclass
 class StructuredScopeResolution:
     action: str = "resolve_document"
     scope: str = RETRIEVAL_SCOPE_NEED_CLARIFICATION
-    hints: dict[str, Any] = field(default_factory=dict)
-    branches: list[dict[str, Any]] = field(default_factory=list)
-    clarification_question: str | None = None
+    targets: list[dict[str, Any]] = field(default_factory=list)
     confidence: float = 0.0
     should_reuse_last_filter: bool = False
     source_type: str = "none"
@@ -77,32 +87,113 @@ class StructuredScopeResolution:
     needs_clarification: bool = False
     reason: str = ""
     used_llm: bool = False
+    llm_status: str = "not_attempted"
+    llm_failure_stage: str | None = None
+    llm_failure_detail: str | None = None
+    llm_raw_preview: str | None = None
+    llm_used_recovered_json: bool = False
+
+    def _default_targets(self, scope: str) -> list[dict[str, Any]]:
+        if scope == "mixed":
+            user_session_scope = "past_sessions" if self.time_hint else "current_session"
+            return [
+                {
+                    "source_type": "system",
+                    "session_scope": None,
+                    "procedure_title_hint": self.procedure_title_hint,
+                    "document_name_hint": None,
+                    "time_hint": None,
+                },
+                {
+                    "source_type": "user_upload",
+                    "session_scope": user_session_scope,
+                    "procedure_title_hint": None,
+                    "document_name_hint": self.document_name_hint,
+                    "time_hint": self.time_hint,
+                },
+            ]
+        if scope == "current_uploads_only":
+            return [
+                {
+                    "source_type": "user_upload",
+                    "session_scope": "current_session",
+                    "procedure_title_hint": None,
+                    "document_name_hint": self.document_name_hint,
+                    "time_hint": self.time_hint,
+                }
+            ]
+        if scope == "past_uploads_only":
+            return [
+                {
+                    "source_type": "user_upload",
+                    "session_scope": "past_sessions",
+                    "procedure_title_hint": None,
+                    "document_name_hint": self.document_name_hint,
+                    "time_hint": self.time_hint,
+                }
+            ]
+        if scope == "user_uploads_all":
+            return [
+                {
+                    "source_type": "user_upload",
+                    "session_scope": "all_sessions",
+                    "procedure_title_hint": None,
+                    "document_name_hint": self.document_name_hint,
+                    "time_hint": self.time_hint,
+                }
+            ]
+        if scope == "need_clarification":
+            return []
+        return [
+            {
+                "source_type": "system",
+                "session_scope": None,
+                "procedure_title_hint": self.procedure_title_hint,
+                "document_name_hint": None,
+                "time_hint": None,
+            }
+        ]
+
+    def _public_scope(self) -> str:
+        if self.scope == RETRIEVAL_SCOPE_HYBRID_SYSTEM_AND_USER or self.resolution_mode == "mixed":
+            return "mixed"
+        if self.scope == RETRIEVAL_SCOPE_CURRENT_SESSION_UPLOADS:
+            return "current_uploads_only"
+        if self.scope in {RETRIEVAL_SCOPE_USER_ALL_UPLOADS, RETRIEVAL_SCOPE_USER_FILE_NAME}:
+            if self.resolution_mode == "resolve_by_time_hint" or self.time_hint:
+                return "past_uploads_only"
+            return "user_uploads_all"
+        if self.scope in {RETRIEVAL_SCOPE_SYSTEM_DOCS, RETRIEVAL_SCOPE_SYSTEM_PROCEDURE}:
+            return "system_only"
+        if self.scope == RETRIEVAL_SCOPE_NEED_CLARIFICATION:
+            return "need_clarification"
+        return self.scope
 
     def model_dump(self) -> dict[str, Any]:
-        scope = self.scope
-        if scope == RETRIEVAL_SCOPE_SYSTEM_DOCS:
-            scope = RETRIEVAL_SCOPE_SYSTEM_PROCEDURE
+        scope = self._public_scope()
         action = self.action
         if self.should_reuse_last_filter:
             action = "reuse_last_filter"
-        elif scope == RETRIEVAL_SCOPE_HYBRID_SYSTEM_AND_USER or self.resolution_mode == "mixed":
+        elif scope == "mixed" or self.resolution_mode == "mixed":
             action = "mixed_retrieval"
-        elif self.needs_clarification or scope == RETRIEVAL_SCOPE_NEED_CLARIFICATION:
+        elif self.needs_clarification or scope == "need_clarification":
             action = "need_clarification"
         elif action not in {"reuse_last_filter", "resolve_document", "mixed_retrieval", "need_clarification"}:
             action = "resolve_document"
-        hints = {
-            "procedure_title": self.hints.get("procedure_title") or self.procedure_title_hint,
-            "time": self.hints.get("time") or self.time_hint,
-        }
-        return {
+        if action == "reuse_last_filter":
+            targets = self.targets if self.targets else []
+        else:
+            targets = self.targets or self._default_targets(scope)
+        payload = {
             "action": action,
             "scope": scope,
-            "hints": hints,
-            "branches": self.branches,
-            "clarification_question": self.clarification_question,
+            "targets": targets,
             "confidence": self.confidence,
         }
+        return payload
+
+
+ScopeResolution = StructuredScopeResolution
 
 
 class ScopeAnalyzer:
@@ -114,6 +205,12 @@ class ScopeAnalyzer:
         "file toi",
         "tai lieu cua toi",
         "theo tai lieu cua toi",
+        "file nay",
+        "tai lieu nay",
+        "vua gui",
+        "toi vua gui",
+        "toi upload",
+        "tai lieu toi upload",
         "file vua upload",
         "file vua gui",
         "tai lieu vua gui",
@@ -162,109 +259,54 @@ class ScopeAnalyzer:
                 max_tokens=settings.OPENROUTER_SCOPE_MAX_TOKENS,
                 default_headers=default_headers or None,
             )
-            self.chain = self._prompt() | llm | StrOutputParser()
+            self.chain = self._prompt() | llm
 
     def _prompt(self) -> ChatPromptTemplate:
-        system_prompt = """Bạn là chuyên gia phân loại scope cho hệ thống hỏi đáp tài liệu hành chính Việt Nam.
-Nhiệm vụ duy nhất của bạn là xác định scope truy hồi. Không trả lời câu hỏi của người dùng.
-Không tạo metadata filter. Không chọn document_id. Không quyết định quyền truy cập.
+        system_prompt = """Bạn phân loại scope truy hồi cho hệ thống hỏi đáp tài liệu hành chính Việt Nam.
+Chỉ trả về đúng 1 object JSON hợp lệ. Không markdown. Không giải thích. Không thêm key.
 
-Trả về đúng MỘT object JSON hợp lệ. Không markdown. Không giải thích. Không thêm key khác.
-
-Schema bắt buộc:
+Schema:
 {
-  "action": "reuse_last_filter | resolve_document | mixed_retrieval | need_clarification",
-  "scope": "system_procedure | current_session_uploads | user_all_uploads | hybrid_system_and_user",
-  "hints": {
-    "procedure_title": null,
-    "time": null
-  },
-  "branches": [],
-  "clarification_question": null,
+  "action": "resolve_document | mixed_retrieval | reuse_last_filter | need_clarification",
+  "scope": "system_only | current_uploads_only | past_uploads_only | user_uploads_all | mixed | need_clarification",
+  "targets": [
+    {
+      "source_type": "system | user_upload",
+      "session_scope": "current_session | past_sessions | all_sessions | null",
+      "procedure_title_hint": null,
+      "document_name_hint": null,
+      "time_hint": null
+    }
+  ],
   "confidence": 0.0
 }
 
-Ý nghĩa của action:
-- reuse_last_filter: câu follow-up an toàn, có thể dùng lại filter đã resolve trước đó.
-- resolve_document: cần resolve một tài liệu hệ thống hoặc tài liệu người dùng mới.
-- mixed_retrieval: cần truy hồi cả tài liệu hệ thống và tài liệu người dùng.
-- need_clarification: chỉ dùng khi nguồn hoặc tài liệu thật sự mơ hồ.
+Quy tắc:
+- `reuse_last_filter`: chỉ khi `was_rewritten=true`, `has_last_filter=true`, và câu hỏi không chuyển sang upload, tài liệu cũ, hay so sánh.
+- `current_uploads_only`: file vừa upload, vừa gửi, file hiện tại, file của tôi trong session này.
+- `past_uploads_only`: file cũ, hôm qua, hôm trước, tuần trước, hoặc có mốc ngày.
+- `system_only`: thủ tục hành chính, lệ phí, giấy tờ, thời hạn, nơi nộp, quy định, không có tín hiệu upload.
+- `mixed`: chỉ khi thực sự so sánh hoặc đối chiếu file upload với quy định hệ thống.
+- `need_clarification`: rất hiếm, chỉ khi không thể phân biệt nguồn.
 
-Quy tắc scope:
-- system_procedure: câu hỏi về thủ tục hành chính, lệ phí, giấy tờ cần chuẩn bị, thời hạn, nơi nộp, quy định.
-- current_session_uploads: người dùng hỏi file hoặc tài liệu vừa upload, hoặc tài liệu đang nằm trong session hiện tại.
-- user_all_uploads: người dùng hỏi file hoặc tài liệu đã upload trước đó, hôm qua, hôm trước, tuần trước, hoặc một mốc ngày cụ thể.
-- hybrid_system_and_user: người dùng so sánh hoặc đối chiếu file upload với quy định hệ thống.
-
-Quy tắc quyết định:
-- Nếu was_rewritten=true, has_last_filter=true, và câu hỏi không chuyển sang nguồn upload, nguồn cũ, hoặc mixed, chọn reuse_last_filter.
-- Nếu câu hỏi nhắc đến file vừa upload, tài liệu vừa gửi, file của tôi, file hiện tại, chọn resolve_document + current_session_uploads.
-- Nếu câu hỏi nhắc đến file cũ, tài liệu hôm qua, hôm trước, tuần trước, hoặc có mốc ngày, chọn resolve_document + user_all_uploads và điền hints.time.
-- Nếu câu hỏi về thủ tục hành chính mà không có tín hiệu upload, chọn resolve_document + system_procedure.
-- Nếu câu hỏi so sánh file upload với quy định hệ thống, chọn mixed_retrieval + hybrid_system_and_user.
-- Chỉ dùng need_clarification khi thật sự không thể phân biệt được giữa các nguồn. Trong hệ thống này, need_clarification phải rất hiếm.
-
-Quy tắc cho hints:
-- hints.procedure_title: chỉ điền khi câu hỏi nói rõ hoặc ngụ ý rõ một thủ tục hành chính cụ thể.
-- hints.time: chỉ điền khi câu hỏi có tín hiệu thời gian như hôm qua, hôm trước, tuần trước, hoặc một ngày cụ thể.
-- Nếu không chắc, dùng null.
-- confidence phải nằm trong khoảng 0 đến 1.
-
-Ví dụ hành vi mong đợi:
-- "file tôi vừa up nói gì?" -> current_session_uploads, resolve_document.
-- "tài liệu tôi up tuần trước nói gì?" -> user_all_uploads, resolve_document, hints.time = "last_week".
-- "lệ phí khi cấp lại thông báo văn bản bưu chính là bao nhiêu?" -> system_procedure, resolve_document, confidence cao.
-- "đối chiếu file tôi upload với quy định hệ thống" -> hybrid_system_and_user, mixed_retrieval.
-- "cần chuẩn bị gì?" khi có last_filter và là follow-up an toàn -> reuse_last_filter.
+Quy tắc target:
+- Trả JSON càng ngắn càng tốt.
+- Có thể bỏ các key `null`.
+- Với `targets`, chỉ cần giữ các key có giá trị thật sự cần thiết.
+- `confidence` trong khoảng `0..1`, có thể bỏ nếu không chắc.
 """
-
         return ChatPromptTemplate.from_messages(
             [
-                ("system", system_prompt),
-                (
-                    "human",
-                    "Phân loại state sau đây:\n{state_json}\n\nChỉ trả JSON.",
+                SystemMessage(content=system_prompt),
+                HumanMessage(content="Ví dụ 1: Lệ phí khi cấp lại thông báo văn bản bưu chính là bao nhiêu?"),
+                AIMessage(
+                    content='{"action":"resolve_document","scope":"system_only","targets":[{"source_type":"system","session_scope":null,"procedure_title_hint":"cấp lại thông báo văn bản bưu chính","document_name_hint":null,"time_hint":null}],"confidence":0.95}'
                 ),
-                (
-                    "human",
-                    "Ví dụ 1: Tôi vừa upload file này, nó nói gì?",
+                HumanMessage(content="Ví dụ 2: Đối chiếu file tôi upload với quy định hệ thống"),
+                AIMessage(
+                    content='{"action":"mixed_retrieval","scope":"mixed","targets":[{"source_type":"system","session_scope":null,"procedure_title_hint":null,"document_name_hint":null,"time_hint":null},{"source_type":"user_upload","session_scope":"current_session","procedure_title_hint":null,"document_name_hint":null,"time_hint":null}],"confidence":0.9}'
                 ),
-                (
-                    "ai",
-                    '{"action":"resolve_document","scope":"current_session_uploads","hints":{"procedure_title":null,"time":null},"branches":[],"clarification_question":null,"confidence":0.92}',
-                ),
-                (
-                    "human",
-                    "Ví dụ 2: Tài liệu tôi up tuần trước có nội dung gì?",
-                ),
-                (
-                    "ai",
-                    '{"action":"resolve_document","scope":"user_all_uploads","hints":{"procedure_title":null,"time":"last_week"},"branches":[],"clarification_question":null,"confidence":0.9}',
-                ),
-                (
-                    "human",
-                    "Ví dụ 3: Lệ phí khi cấp lại thông báo văn bản bưu chính là bao nhiêu thế bạn?",
-                ),
-                (
-                    "ai",
-                    '{"action":"resolve_document","scope":"system_procedure","hints":{"procedure_title":"cấp lại thông báo văn bản bưu chính","time":null},"branches":[],"clarification_question":null,"confidence":0.95}',
-                ),
-                (
-                    "human",
-                    "Ví dụ 4: Đối chiếu file tôi upload với quy định hệ thống",
-                ),
-                (
-                    "ai",
-                    '{"action":"mixed_retrieval","scope":"hybrid_system_and_user","hints":{"procedure_title":null,"time":null},"branches":[{"branch_name":"system","scope":"system_procedure"},{"branch_name":"user_upload","scope":"current_session_uploads"}],"clarification_question":null,"confidence":0.9}',
-                ),
-                (
-                    "human",
-                    "Ví dụ 5: Cần chuẩn bị gì?",
-                ),
-                (
-                    "ai",
-                    '{"action":"reuse_last_filter","scope":"system_procedure","hints":{"procedure_title":"đăng ký kết hôn","time":null},"branches":[],"clarification_question":null,"confidence":0.88}',
-                ),
+                ("human", "Phân loại state sau đây:\n{state_json}\n\nChỉ trả JSON một dòng."),
             ]
         )
     def _has_source_switch_signal(self, query: str) -> bool:
@@ -276,6 +318,10 @@ Ví dụ hành vi mong đợi:
     def _has_system_document_signal(self, query: str) -> bool:
         normalized = _normalize_text(query)
         return any(term in normalized for term in self.system_document_terms)
+
+    def _has_mixed_signal(self, query: str) -> bool:
+        normalized = _normalize_text(query)
+        return any(term in normalized for term in ("so sanh", "doi chieu", "khac nhau", "giong nhau", "dap ung", "voi quy dinh he thong"))
 
     def _filename_hint(self, query: str) -> str | None:
         match = re.search(r"\b([a-z0-9][a-z0-9_\-().\[\]]*\.(?:pdf|docx?|xlsx?|pptx?|txt|md))\b", query, re.I)
@@ -340,9 +386,21 @@ Ví dụ hành vi mong đợi:
                 scope=RETRIEVAL_SCOPE_HYBRID_SYSTEM_AND_USER,
                 resolution_mode="mixed",
                 source_type="hybrid",
-                branches=[
-                    {"branch_name": "system", "scope": RETRIEVAL_SCOPE_SYSTEM_DOCS},
-                    {"branch_name": "user_upload", "scope": RETRIEVAL_SCOPE_CURRENT_SESSION_UPLOADS},
+                targets=[
+                    {
+                        "source_type": "system",
+                        "session_scope": None,
+                        "procedure_title_hint": procedure,
+                        "document_name_hint": None,
+                        "time_hint": None,
+                    },
+                    {
+                        "source_type": "user_upload",
+                        "session_scope": "past_sessions" if time_hint else "current_session",
+                        "procedure_title_hint": None,
+                        "document_name_hint": filename,
+                        "time_hint": time_hint,
+                    },
                 ],
                 confidence=0.84,
                 reason=reason,
@@ -353,6 +411,15 @@ Ví dụ hành vi mong đợi:
                 resolution_mode="resolve_by_filename",
                 source_type=SOURCE_TYPE_USER_UPLOAD,
                 document_name_hint=filename,
+                targets=[
+                    {
+                        "source_type": "user_upload",
+                        "session_scope": "past_sessions",
+                        "procedure_title_hint": None,
+                        "document_name_hint": filename,
+                        "time_hint": None,
+                    }
+                ],
                 confidence=0.88,
                 reason=reason,
             )
@@ -378,6 +445,15 @@ Ví dụ hành vi mong đợi:
                 scope=RETRIEVAL_SCOPE_CURRENT_SESSION_UPLOADS,
                 resolution_mode="resolve_current_upload",
                 source_type=SOURCE_TYPE_USER_UPLOAD,
+                targets=[
+                    {
+                        "source_type": "user_upload",
+                        "session_scope": "current_session",
+                        "procedure_title_hint": None,
+                        "document_name_hint": filename,
+                        "time_hint": None,
+                    }
+                ],
                 confidence=0.86,
                 reason=reason,
             )
@@ -387,6 +463,15 @@ Ví dụ hành vi mong đợi:
                 resolution_mode="resolve_by_time_hint",
                 source_type=SOURCE_TYPE_USER_UPLOAD,
                 time_hint=time_hint,
+                targets=[
+                    {
+                        "source_type": "user_upload",
+                        "session_scope": "past_sessions",
+                        "procedure_title_hint": None,
+                        "document_name_hint": filename,
+                        "time_hint": time_hint,
+                    }
+                ],
                 confidence=0.84,
                 reason=reason,
             )
@@ -396,6 +481,15 @@ Ví dụ hành vi mong đợi:
                 resolution_mode="semantic_document_search",
                 source_type=SOURCE_TYPE_USER_UPLOAD,
                 document_topic_hint=topic,
+                targets=[
+                    {
+                        "source_type": "user_upload",
+                        "session_scope": "all_sessions",
+                        "procedure_title_hint": None,
+                        "document_name_hint": None,
+                        "time_hint": None,
+                    }
+                ],
                 confidence=0.76,
                 reason=reason,
             )
@@ -405,6 +499,15 @@ Ví dụ hành vi mong đợi:
                 resolution_mode="resolve_new_procedure",
                 source_type=SOURCE_TYPE_SYSTEM,
                 procedure_title_hint=procedure,
+                targets=[
+                    {
+                        "source_type": "system",
+                        "session_scope": None,
+                        "procedure_title_hint": procedure,
+                        "document_name_hint": None,
+                        "time_hint": None,
+                    }
+                ],
                 confidence=0.82,
                 reason=reason,
             )
@@ -429,16 +532,17 @@ Ví dụ hành vi mong đợi:
                 scope=RETRIEVAL_SCOPE_SYSTEM_DOCS,
                 resolution_mode="resolve_new_procedure",
                 source_type=SOURCE_TYPE_SYSTEM,
+                targets=[
+                    {
+                        "source_type": "system",
+                        "session_scope": None,
+                        "procedure_title_hint": procedure,
+                        "document_name_hint": None,
+                        "time_hint": None,
+                    }
+                ],
                 confidence=0.7,
                 reason="Administrative document question without upload signal; defaulted to system docs.",
-            )
-        if action == "general_query":
-            return StructuredScopeResolution(
-                scope=RETRIEVAL_SCOPE_GENERAL_QUERY,
-                resolution_mode="need_clarification",
-                source_type="none",
-                confidence=0.8,
-                reason="Intent does not require retrieval.",
             )
         if action == "resolve_system_procedure":
             return StructuredScopeResolution(
@@ -446,6 +550,15 @@ Ví dụ hành vi mong đợi:
                 resolution_mode="resolve_new_procedure",
                 source_type=SOURCE_TYPE_SYSTEM,
                 procedure_title_hint=procedure,
+                targets=[
+                    {
+                        "source_type": "system",
+                        "session_scope": None,
+                        "procedure_title_hint": procedure,
+                        "document_name_hint": None,
+                        "time_hint": None,
+                    }
+                ],
                 confidence=0.72,
                 reason=reason,
             )
@@ -454,6 +567,15 @@ Ví dụ hành vi mong đợi:
                 scope=RETRIEVAL_SCOPE_CURRENT_SESSION_UPLOADS,
                 resolution_mode="resolve_current_upload",
                 source_type=SOURCE_TYPE_USER_UPLOAD,
+                targets=[
+                    {
+                        "source_type": "user_upload",
+                        "session_scope": "current_session",
+                        "procedure_title_hint": None,
+                        "document_name_hint": filename,
+                        "time_hint": None,
+                    }
+                ],
                 confidence=0.72,
                 reason=reason,
             )
@@ -462,6 +584,15 @@ Ví dụ hành vi mong đợi:
                 scope=RETRIEVAL_SCOPE_USER_ALL_UPLOADS,
                 resolution_mode="resolve_previous_upload",
                 source_type=SOURCE_TYPE_USER_UPLOAD,
+                targets=[
+                    {
+                        "source_type": "user_upload",
+                        "session_scope": "past_sessions",
+                        "procedure_title_hint": None,
+                        "document_name_hint": filename,
+                        "time_hint": time_hint,
+                    }
+                ],
                 confidence=0.72,
                 reason=reason,
             )
@@ -470,7 +601,6 @@ Ví dụ hành vi mong đợi:
             resolution_mode="need_clarification",
             source_type="none",
             needs_clarification=True,
-            clarification_question="Bạn muốn hỏi tài liệu hệ thống, file vừa upload, file cũ, hay một file cụ thể?",
             confidence=0.45,
             reason=reason,
         )
@@ -509,41 +639,60 @@ Ví dụ hành vi mong đợi:
         mode = str(payload.get("resolution_mode") or payload.get("mode") or "need_clarification")
         if mode not in RESOLUTION_MODES:
             mode = "need_clarification"
-        source_type = str(payload.get("source_type") or payload.get("source") or "none")
-        hint = payload.get("hint")
-        if source_type == SOURCE_TYPE_USER_UPLOAD:
-            document_name_hint = payload.get("document_name_hint") or hint
-            procedure_title_hint = payload.get("procedure_title_hint")
-        elif source_type == SOURCE_TYPE_SYSTEM:
-            procedure_title_hint = payload.get("procedure_title_hint") or hint
-            document_name_hint = payload.get("document_name_hint")
-        else:
-            procedure_title_hint = payload.get("procedure_title_hint")
-            document_name_hint = payload.get("document_name_hint")
-        hints = payload.get("hints") if isinstance(payload.get("hints"), dict) else {}
-        if hints:
-            procedure_title_hint = hints.get("procedure_title") or procedure_title_hint
-            time_hint = hints.get("time") or payload.get("time_hint") or payload.get("time")
-        else:
-            time_hint = payload.get("time_hint") or payload.get("time")
+        targets = payload.get("targets")
+        if not isinstance(targets, list):
+            targets = []
+        normalized_targets: list[dict[str, Any]] = []
+        for target in targets:
+            if not isinstance(target, dict):
+                continue
+            normalized_targets.append(
+                {
+                    "source_type": target.get("source_type") or "none",
+                    "session_scope": target.get("session_scope"),
+                    "procedure_title_hint": target.get("procedure_title_hint"),
+                    "document_name_hint": target.get("document_name_hint"),
+                    "time_hint": target.get("time_hint"),
+                }
+            )
+        if not normalized_targets:
+            legacy_hints = payload.get("hints") if isinstance(payload.get("hints"), dict) else {}
+            normalized_targets = [
+                {
+                    "source_type": payload.get("source_type") or payload.get("source") or "none",
+                    "session_scope": payload.get("session_scope"),
+                    "procedure_title_hint": payload.get("procedure_title_hint") or legacy_hints.get("procedure_title"),
+                    "document_name_hint": payload.get("document_name_hint"),
+                    "time_hint": payload.get("time_hint") or legacy_hints.get("time") or payload.get("time"),
+                }
+            ] if payload.get("source_type") or payload.get("source") or payload.get("procedure_title_hint") or payload.get("document_name_hint") or payload.get("time_hint") or legacy_hints else []
+        should_reuse = action == "reuse_last_filter" or bool(payload.get("should_reuse_last_filter") or payload.get("reuse"))
         return StructuredScopeResolution(
             action=action,
             scope=scope,
             resolution_mode=mode,
-            should_reuse_last_filter=bool(payload.get("should_reuse_last_filter") or payload.get("reuse")),
-            source_type=source_type,
-            procedure_title_hint=procedure_title_hint,
-            document_name_hint=document_name_hint,
+            should_reuse_last_filter=should_reuse,
+            targets=normalized_targets,
+            source_type=str(payload.get("source_type") or payload.get("source") or "none"),
+            procedure_title_hint=payload.get("procedure_title_hint"),
+            document_name_hint=payload.get("document_name_hint"),
             document_id_hint=payload.get("document_id_hint"),
-            time_hint=time_hint,
+            time_hint=payload.get("time_hint") or payload.get("time"),
             document_topic_hint=payload.get("document_topic_hint") or payload.get("topic"),
-            branches=payload.get("branches") if isinstance(payload.get("branches"), list) else [],
             needs_clarification=bool(payload.get("needs_clarification") or payload.get("clarify")),
-            clarification_question=payload.get("clarification_question"),
             confidence=float(payload.get("confidence") or 0.0),
             reason=str(payload.get("reason") or "Resolved by scope LLM."),
             used_llm=True,
         )
+
+    def _parse_payload(self, raw: str) -> tuple[StructuredScopeResolution, bool]:
+        try:
+            return self._clean_payload(json.loads(raw)), False
+        except json.JSONDecodeError:
+            recovered = _trim_to_last_complete_json_fragment(raw)
+            if recovered is None:
+                raise
+            return self._clean_payload(json.loads(recovered)), True
 
     def _apply_security_guards(self, resolution: StructuredScopeResolution, state: dict[str, Any]) -> StructuredScopeResolution:
         query = state.get("final_query") or state.get("original_query") or ""
@@ -554,13 +703,45 @@ Ví dụ hành vi mong đợi:
                 resolution.resolution_mode = "need_clarification"
                 resolution.scope = RETRIEVAL_SCOPE_NEED_CLARIFICATION
                 resolution.needs_clarification = True
-                resolution.clarification_question = "Câu hỏi có dấu hiệu đổi nguồn tài liệu. Bạn muốn hỏi file upload hay tài liệu hệ thống?"
                 resolution.reason = "Reuse last filter blocked by source-switch/security guard."
-        if resolution.scope == RETRIEVAL_SCOPE_HYBRID_SYSTEM_AND_USER and not resolution.branches:
-            resolution.branches = [
-                {"branch_name": "system", "scope": RETRIEVAL_SCOPE_SYSTEM_DOCS},
-                {"branch_name": "user_upload", "scope": RETRIEVAL_SCOPE_CURRENT_SESSION_UPLOADS},
-            ]
+        if resolution._public_scope() == "mixed" and not resolution.targets:
+            resolution.targets = resolution._default_targets("mixed")
+        return resolution
+
+    def _apply_upload_priority_guards(
+        self, resolution: StructuredScopeResolution, state: dict[str, Any]
+    ) -> StructuredScopeResolution:
+        query = state.get("final_query") or state.get("original_query") or ""
+        if not self._has_source_switch_signal(query) or self._has_mixed_signal(query):
+            return resolution
+        if resolution._public_scope() != "mixed":
+            return resolution
+
+        filename = self._filename_hint(query)
+        time_hint = self._time_hint(query)
+        if time_hint:
+            resolution.scope = RETRIEVAL_SCOPE_USER_ALL_UPLOADS
+            resolution.resolution_mode = "resolve_by_time_hint"
+            resolution.time_hint = time_hint
+            session_scope = "past_sessions"
+        else:
+            resolution.scope = RETRIEVAL_SCOPE_CURRENT_SESSION_UPLOADS
+            resolution.resolution_mode = "resolve_current_upload"
+            session_scope = "current_session"
+
+        resolution.action = "resolve_document"
+        resolution.source_type = SOURCE_TYPE_USER_UPLOAD
+        resolution.document_name_hint = filename
+        resolution.targets = [
+            {
+                "source_type": "user_upload",
+                "session_scope": session_scope,
+                "procedure_title_hint": None,
+                "document_name_hint": filename,
+                "time_hint": time_hint,
+            }
+        ]
+        resolution.reason = "Upload source signal without comparison; routed to user upload scope."
         return resolution
 
     def _apply_administrative_guards(
@@ -570,7 +751,7 @@ Ví dụ hành vi mong đợi:
         normalized_query = _normalize_text(query)
         if self._has_source_switch_signal(query) or not self._has_system_document_signal(query):
             return resolution
-        if resolution.scope not in {RETRIEVAL_SCOPE_NEED_CLARIFICATION, RETRIEVAL_SCOPE_GENERAL_QUERY}:
+        if resolution._public_scope() != "need_clarification":
             return resolution
 
         procedure = self._procedure_hint(query)
@@ -580,7 +761,6 @@ Ví dụ hành vi mong đợi:
             resolution.source_type = SOURCE_TYPE_SYSTEM
             resolution.procedure_title_hint = procedure or resolution.procedure_title_hint
             resolution.needs_clarification = False
-            resolution.clarification_question = None
             resolution.confidence = max(resolution.confidence, 0.82)
             resolution.reason = "Strong administrative signal; routed to system procedure."
             return resolution
@@ -589,7 +769,6 @@ Ví dụ hành vi mong đợi:
         resolution.resolution_mode = "switch_scope"
         resolution.source_type = SOURCE_TYPE_SYSTEM
         resolution.needs_clarification = False
-        resolution.clarification_question = None
         resolution.confidence = max(resolution.confidence, 0.8)
         resolution.reason = "Strong administrative signal; routed to system docs."
         return resolution
@@ -597,16 +776,34 @@ Ví dụ hành vi mong đợi:
     def resolve(self, state: dict[str, Any]) -> StructuredScopeResolution:
         if self.chain is None:
             resolution = self._fallback(state, reason="Scope LLM unavailable; used deterministic fallback.")
+            resolution.llm_status = "chain_unavailable"
+            resolution.llm_failure_stage = "chain_init"
+            resolution.llm_failure_detail = "ScopeAnalyzer chain is None."
             return self._apply_administrative_guards(resolution, state)
         try:
-            raw = self.chain.invoke(
+            response = self.chain.invoke(
                 {"state_json": json.dumps(self._build_llm_input(state), ensure_ascii=False, default=str)}
-            ).strip()
+            )
+            raw = response.content if hasattr(response, "content") else response
+            if isinstance(raw, list):
+                raw = "".join(part.get("text", "") for part in raw if isinstance(part, dict))
+            raw = str(raw).strip()
             if raw.startswith("```"):
                 raw = raw.strip("`")
                 raw = raw.removeprefix("json").strip()
-            resolution = self._clean_payload(json.loads(raw))
-        except Exception:
+            resolution, used_recovered_json = self._parse_payload(raw)
+            resolution.llm_status = "parsed_with_recovery" if used_recovered_json else "parsed"
+            resolution.llm_used_recovered_json = used_recovered_json
+            resolution.llm_raw_preview = raw[:240]
+        except Exception as exc:
             resolution = self._fallback(state, reason="Scope LLM failed; used deterministic fallback.")
+            resolution.llm_status = "fallback"
+            resolution.llm_failure_stage = "invoke_or_parse"
+            resolution.llm_failure_detail = f"{type(exc).__name__}: {exc}"
+            try:
+                resolution.llm_raw_preview = raw[:240]
+            except Exception:
+                resolution.llm_raw_preview = None
         resolution = self._apply_security_guards(resolution, state)
+        resolution = self._apply_upload_priority_guards(resolution, state)
         return self._apply_administrative_guards(resolution, state)

@@ -35,7 +35,7 @@ def build_retrieval_filter(
 ) -> dict:
     selected_document_ids = selected_document_ids or []
 
-    if scope in {RETRIEVAL_SCOPE_CURRENT_UPLOAD, RETRIEVAL_SCOPE_CURRENT_SESSION_UPLOADS}:
+    if scope in {"current_uploads_only", RETRIEVAL_SCOPE_CURRENT_UPLOAD, RETRIEVAL_SCOPE_CURRENT_SESSION_UPLOADS}:
         conditions = [
             {"source_type": SOURCE_TYPE_USER_UPLOAD},
             {"owner_user_id": user_id},
@@ -43,7 +43,7 @@ def build_retrieval_filter(
         if session_id:
             conditions.append({"session_id": session_id})
         base = _and(*conditions)
-    elif scope in {RETRIEVAL_SCOPE_ALL_USER_UPLOADS, RETRIEVAL_SCOPE_USER_ALL_UPLOADS}:
+    elif scope in {"past_uploads_only", "user_uploads_all", RETRIEVAL_SCOPE_ALL_USER_UPLOADS, RETRIEVAL_SCOPE_USER_ALL_UPLOADS}:
         base = _and({"source_type": SOURCE_TYPE_USER_UPLOAD}, {"owner_user_id": user_id})
     elif scope == RETRIEVAL_SCOPE_USER_FILE_NAME:
         conditions = [
@@ -53,7 +53,7 @@ def build_retrieval_filter(
         if filename:
             conditions.append({"filename": filename})
         base = _and(*conditions)
-    elif scope == RETRIEVAL_SCOPE_SYSTEM_DOCS:
+    elif scope in {"system_only", RETRIEVAL_SCOPE_SYSTEM_DOCS, RETRIEVAL_SCOPE_SYSTEM_PROCEDURE}:
         base = _and({"source_type": SOURCE_TYPE_SYSTEM}, {"visibility": VISIBILITY_GLOBAL})
     elif scope == RETRIEVAL_SCOPE_SYSTEM_PROCEDURE:
         conditions = [
@@ -63,14 +63,14 @@ def build_retrieval_filter(
         if procedure_title:
             conditions.append({"procedure_title": procedure_title})
         base = _and(*conditions)
-    elif scope == RETRIEVAL_SCOPE_HYBRID_SYSTEM_AND_USER:
+    elif scope in {"mixed", RETRIEVAL_SCOPE_HYBRID_SYSTEM_AND_USER, RETRIEVAL_SCOPE_MIXED}:
         base = {
             "$or": [
                 _and({"source_type": SOURCE_TYPE_SYSTEM}, {"visibility": VISIBILITY_GLOBAL}),
                 _and({"source_type": SOURCE_TYPE_USER_UPLOAD}, {"owner_user_id": user_id}),
             ]
         }
-    elif scope in {RETRIEVAL_SCOPE_GENERAL_QUERY, RETRIEVAL_SCOPE_NEED_CLARIFICATION}:
+    elif scope in {"need_clarification", RETRIEVAL_SCOPE_GENERAL_QUERY, RETRIEVAL_SCOPE_NEED_CLARIFICATION}:
         base = {}
     else:
         base = {

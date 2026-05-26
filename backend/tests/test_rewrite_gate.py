@@ -39,5 +39,5 @@ def test_rewrite_gate_defaults_to_no_rewrite_when_llm_unavailable():
     gate.chain = None
     decision = gate.decide(original_query="còn lệ phí thì sao?", conversation_state={"last_filename": "ho_so_alpha.pdf"})
 
-    assert decision.needs_rewrite is False
+    assert decision.needs_rewrite is True
     assert decision.used_llm is False

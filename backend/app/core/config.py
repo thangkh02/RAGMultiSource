@@ -18,12 +18,12 @@ class Settings(BaseSettings):
     OPENAI_MODEL: str = "gpt-4o-mini"
     LLM_PROVIDER: str = "openai"
     OPENROUTER_API_KEY: str = ""
-    OPENROUTER_MODEL: str = "openai/gpt-4o-mini"
+    OPENROUTER_MODEL: str = "openai/gpt-4.1-nano"
     OPENROUTER_QUERY_REWRITE_MODEL: str = "google/gemini-3.1-flash-lite-preview"
     OPENROUTER_REWRITE_GATE_MODEL: str = "google/gemini-3.1-flash-lite-preview"
     OPENROUTER_INTENT_MODEL: str = "google/gemini-3.1-flash-lite-preview"
     OPENROUTER_SCOPE_MODEL: str = "google/gemini-2.0-flash-lite-001"
-    OPENROUTER_SCOPE_MAX_TOKENS: int = 160
+    OPENROUTER_SCOPE_MAX_TOKENS: int = 64
     OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
     OPENROUTER_SITE_URL: str = ""
     OPENROUTER_APP_NAME: str = "RAG Chatbot"

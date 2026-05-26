@@ -23,7 +23,6 @@ from app.core.constants import (
     VISIBILITY_GLOBAL,
 )
 from app.rag.generation.source_formatter import SourceFormatter
-from app.rag.graph.scope_analyzer import ScopeAnalyzer
 from app.rag.query.intent_router import (
     INTENT_GENERAL_QUERY,
     INTENT_NEED_CLARIFICATION,
@@ -32,7 +31,6 @@ from app.rag.query.intent_router import (
 from app.rag.retrieval.context_validator import FALLBACK_NO_CONTEXT
 from app.rag.retrieval.filters import build_retrieval_filter
 from app.rag.retrieval.resolvers.document_resolver import DocumentResolution
-from app.rag.retrieval.resolvers.scope_resolver import ScopeResolution
 from app.rag.retrieval.strategy import RetrievalPlan
 from app.rag.rewrite import QueryRewrite
 from app.schemas.common_schema import SourceItem
@@ -105,12 +103,22 @@ class CandidateSelection:
 class RAGGraphNodes:
     source_switch_terms = (
         "file upload",
+        "vua upload",
+        "toi vua upload",
+        "file toi",
+        "tai lieu cua toi",
         "file vua upload",
         "tai lieu vua upload",
         "file vua gui",
+        "file nay",
+        "tai lieu nay",
         "hom qua",
+        "hom truoc",
         "hom kia",
+        "tuan truoc",
         "lan truoc",
+        "file cu",
+        "tai lieu cu",
         "so sanh",
         "doi chieu",
         "quy dinh he thong",
@@ -135,7 +143,6 @@ class RAGGraphNodes:
     def __init__(self, pipeline: Any) -> None:
         self.pipeline = pipeline
         self.source_formatter = SourceFormatter()
-        self.scope_analyzer = ScopeAnalyzer()
 
     def _last_context(self, state: dict[str, Any]) -> dict[str, Any]:
         runtime_state = state.get("runtime_context") or {}
@@ -153,10 +160,11 @@ class RAGGraphNodes:
         last_context = self._last_context(state)
         if not last_context.get("filter"):
             return False
-        final_query = state.get("final_query") or state.get("original_query") or ""
-        if self._has_source_switch_signal(final_query):
+        original_query = state.get("original_query") or ""
+        final_query = state.get("final_query") or original_query
+        if self._has_source_switch_signal(original_query) or self._has_source_switch_signal(final_query):
             return False
-        return bool(state.get("was_rewritten")) or self._looks_like_follow_up(state.get("original_query", ""))
+        return bool(state.get("was_rewritten")) or self._looks_like_follow_up(original_query)
 
     def _scope_from_action(self, action: str) -> str:
         return {
@@ -171,9 +179,32 @@ class RAGGraphNodes:
             ACTION_GENERAL_QUERY: RETRIEVAL_SCOPE_GENERAL_QUERY,
         }.get(action, RETRIEVAL_SCOPE_AUTO)
 
+    def _targets(self, scope_resolution: dict[str, Any]) -> list[dict[str, Any]]:
+        targets = scope_resolution.get("targets")
+        return targets if isinstance(targets, list) else []
+
+    def _target_for_source(self, scope_resolution: dict[str, Any], source_type: str) -> dict[str, Any]:
+        for target in self._targets(scope_resolution):
+            if isinstance(target, dict) and target.get("source_type") == source_type:
+                return target
+        return {}
+
     def _last_scope_fallback(self, state: dict[str, Any] | None = None) -> str:
         runtime_state = (state or {}).get("runtime_context") or {}
         return runtime_state.get("last_scope") or self._last_context(state or {}).get("scope") or RETRIEVAL_SCOPE_AUTO
+
+    def _filename_hint(self, query: str) -> str | None:
+        match = re.search(r"\b([a-z0-9][a-z0-9_\-().\[\]]*\.(?:pdf|docx?|xlsx?|pptx?|txt|md))\b", query, re.I)
+        return match.group(0).strip() if match else None
+
+    def _procedure_hint(self, query: str) -> str | None:
+        match = re.search(r"(?i)(?:thủ tục|thu tuc)\s+(.+?)(?:\s+cần|\s+can|\s+gồm|\s+gom|\s+là|\s+la|\?|$)", query)
+        if not match:
+            return None
+        candidate = match.group(1).strip(" .,:;?")
+        if _normalize_text(candidate) in {"gi", "nao", "nhu nao", "gi vay", "gi the"}:
+            return None
+        return candidate or None
 
     @traceable(name="rag_load_context_node")
     def load_context_node(self, state: dict[str, Any]) -> dict[str, Any]:
@@ -197,12 +228,13 @@ class RAGGraphNodes:
 
     @traceable(name="rag_rewrite_query_node")
     def rewrite_query_node(self, state: dict[str, Any]) -> dict[str, Any]:
-        rewrite = self.pipeline.query_rewriter.rewrite_standalone(
+        rewrite = self.pipeline.query_rewriter.rewrite(
             question=state["original_query"],
+            intent_resolution=state.get("intent_resolution") or {},
+            scope_resolution=state.get("scope_resolution") or {},
             conversation_state=state.get("runtime_context") or {},
         )
         payload = rewrite.model_dump()
-        payload["stage"] = "pre_intent"
         return {
             "query_rewrite": payload,
             "rewritten_query": rewrite.rewritten_question,
@@ -233,29 +265,61 @@ class RAGGraphNodes:
             question=state["final_query"],
             conversation_state=state.get("runtime_context") or {},
         )
-        return {"intent_resolution": resolution.model_dump()}
+        intent_resolution = resolution.model_dump()
+        scope_resolution = {
+            "scope": intent_resolution.get("scope"),
+            "targets": intent_resolution.get("targets") or [],
+            "confidence": intent_resolution.get("confidence", 0.0),
+        }
+        if intent_resolution.get("action"):
+            scope_resolution["action"] = intent_resolution["action"]
+        retrieval_plan = dict(state.get("retrieval_plan") or {})
+        if scope_resolution.get("action"):
+            retrieval_plan["action"] = scope_resolution["action"]
+        else:
+            retrieval_plan.pop("action", None)
+        retrieval_plan["target_scope"] = scope_resolution["scope"]
+        retrieval_plan["scope_resolution"] = scope_resolution
+        return {
+            "intent_resolution": intent_resolution,
+            "scope_resolution": scope_resolution,
+            "metadata_filter": {},
+            "retrieval_plan": retrieval_plan,
+        }
 
-    def _reuse_last_scope_resolution(self, state: dict[str, Any]) -> ScopeResolution:
+    def _reuse_last_scope_resolution(self, state: dict[str, Any]) -> Any:
+        from app.rag.graph.scope.scope_analyzer import ScopeResolution
+
         last_context = self._last_context(state)
         runtime_state = state.get("runtime_context") or {}
         return ScopeResolution(
             scope=last_context.get("scope") or runtime_state.get("last_scope") or RETRIEVAL_SCOPE_AUTO,
-            metadata_filter=last_context.get("filter") or {},
-            detected_procedure_title=last_context.get("procedure_title") or runtime_state.get("last_procedure_title"),
-            detected_filename=last_context.get("filename") or runtime_state.get("last_filename"),
-            matched_rules=["reuse_last_filter"],
+            should_reuse_last_filter=True,
+            source_type=last_context.get("source_type") or "none",
+            procedure_title_hint=last_context.get("procedure_title") or runtime_state.get("last_procedure_title"),
+            document_name_hint=last_context.get("filename") or runtime_state.get("last_filename"),
+            document_id_hint=last_context.get("document_id"),
+            resolution_mode="reuse_last_context",
+            confidence=0.95,
             reason="Reused last resolved context filter.",
         )
 
-    @traceable(name="rag_scope_resolver_node")
-    def scope_resolver_node(self, state: dict[str, Any]) -> dict[str, Any]:
-        structured_resolution = self.scope_analyzer.resolve(state)
+    @traceable(name="rag_scope_analyzer_node")
+    def scope_analyzer_node(self, state: dict[str, Any]) -> dict[str, Any]:
+        from app.rag.graph.scope.scope_analyzer import ScopeAnalyzer
+
         retrieval_plan = dict(state.get("retrieval_plan") or {})
+        if self._can_reuse_last_filter(state):
+            structured_resolution = self._reuse_last_scope_resolution(state)
+        else:
+            structured_resolution = ScopeAnalyzer().resolve(state)
+
+        scope_resolution = structured_resolution.model_dump()
         retrieval_plan["target_scope"] = structured_resolution.scope
-        retrieval_plan["action"] = structured_resolution.model_dump().get("action")
-        retrieval_plan["scope_resolution"] = structured_resolution.model_dump()
+        retrieval_plan["action"] = scope_resolution.get("action")
+        retrieval_plan["scope_resolution"] = scope_resolution
         return {
-            "scope_resolution": structured_resolution.model_dump(),
+            "scope_resolution": scope_resolution,
             "metadata_filter": {},
             "retrieval_plan": retrieval_plan,
         }
@@ -264,7 +328,6 @@ class RAGGraphNodes:
     async def document_resolver_node(self, state: dict[str, Any]) -> dict[str, Any]:
         scope_resolution = state.get("scope_resolution") or {}
         action = scope_resolution.get("action")
-        hints = scope_resolution.get("hints") or {}
         if action == "reuse_last_filter":
             last_context = self._last_context(state)
             selected_ids = [doc_id for doc_id in [last_context.get("document_id")] if doc_id]
@@ -276,16 +339,17 @@ class RAGGraphNodes:
             )
         else:
             query = state.get("final_query") or state.get("original_query") or ""
+            system_target = self._target_for_source(scope_resolution, "system")
+            user_target = self._target_for_source(scope_resolution, "user_upload")
             detected_procedure_title = (
-                hints.get("procedure_title")
-                or self.scope_analyzer._procedure_hint(query)
+                system_target.get("procedure_title_hint")
+                or self._procedure_hint(query)
                 or scope_resolution.get("procedure_title_hint")
-                or scope_resolution.get("detected_procedure_title")
             )
-            detected_filename = self.scope_analyzer._filename_hint(query)
-            time_hint = hints.get("time") or scope_resolution.get("time_hint") or scope_resolution.get("detected_time_hint")
+            detected_filename = user_target.get("document_name_hint") or self._filename_hint(query) or scope_resolution.get("document_name_hint")
+            time_hint = user_target.get("time_hint")
             resolution = await self.pipeline.document_resolver.resolve(
-                scope=scope_resolution.get("scope"),
+                scope=scope_resolution.get("scope") or RETRIEVAL_SCOPE_NEED_CLARIFICATION,
                 metadata_filter={},
                 user_id=state["user_id"],
                 session_id=state.get("session_id"),
@@ -306,7 +370,7 @@ class RAGGraphNodes:
         candidates = state.get("document_candidates") or []
         document_resolution = dict(state.get("document_resolution") or {})
         scope_resolution = state.get("scope_resolution") or {}
-        scope = scope_resolution.get("scope")
+        scope = scope_resolution.get("scope") or RETRIEVAL_SCOPE_NEED_CLARIFICATION
         if len(candidates) <= 1:
             selection = CandidateSelection(
                 selected_document_ids=document_resolution.get("selected_document_ids", []),
@@ -315,7 +379,7 @@ class RAGGraphNodes:
                 needs_clarification=False,
                 reason="Zero or one candidate; no disambiguation needed.",
             )
-        elif scope in {RETRIEVAL_SCOPE_CURRENT_SESSION_UPLOADS, RETRIEVAL_SCOPE_USER_ALL_UPLOADS}:
+        elif scope in {"current_uploads_only", "past_uploads_only", "user_uploads_all", "mixed"}:
             selection = CandidateSelection(
                 selected_document_ids=document_resolution.get("selected_document_ids", []),
                 selected_documents=candidates[:10],
@@ -340,18 +404,17 @@ class RAGGraphNodes:
         selected_document_ids = document_resolution.get("selected_document_ids") or state.get("selected_document_ids") or []
         resolved_documents = document_resolution.get("resolved_documents") or []
         first_document = resolved_documents[0] if resolved_documents else {}
-        hints = scope_resolution.get("hints") or {}
+        system_target = self._target_for_source(scope_resolution, "system")
+        user_target = self._target_for_source(scope_resolution, "user_upload")
         procedure_title = (
             first_document.get("procedure_title")
-            or hints.get("procedure_title")
+            or system_target.get("procedure_title_hint")
             or scope_resolution.get("procedure_title_hint")
-            or scope_resolution.get("detected_procedure_title")
         )
         filename = (
             first_document.get("filename")
-            or hints.get("filename")
+            or user_target.get("document_name_hint")
             or scope_resolution.get("document_name_hint")
-            or scope_resolution.get("detected_filename")
         )
 
         if scope_resolution.get("action") == "reuse_last_filter":
@@ -376,7 +439,7 @@ class RAGGraphNodes:
         strategy_plan = self.pipeline.retrieval_strategy.plan(
             rewritten_question=state["final_query"],
             intent_resolution=state.get("intent_resolution") or {},
-            scope=scope_resolution.get("scope"),
+            scope=scope_resolution.get("scope") or RETRIEVAL_SCOPE_NEED_CLARIFICATION,
             metadata_filter=document_resolution.get("metadata_filter") or state.get("metadata_filter") or {},
         )
         payload = strategy_plan.model_dump()
@@ -509,19 +572,28 @@ class RAGGraphNodes:
         return "rewrite_query" if (state.get("rewrite_gate") or {}).get("needs_rewrite") else "use_original_query"
 
     def route_after_intent(self, state: dict[str, Any]) -> str:
-        intent = (state.get("intent_resolution") or {}).get("intent")
+        intent_resolution = state.get("intent_resolution") or {}
+        scope_resolution = state.get("scope_resolution") or {}
+        intent = intent_resolution.get("intent")
+        action = scope_resolution.get("action") or intent_resolution.get("action")
+        scope = scope_resolution.get("scope") or intent_resolution.get("scope")
         if intent == INTENT_UNSUPPORTED:
             return "unsupported"
-        if intent == INTENT_GENERAL_QUERY or not (state.get("intent_resolution") or {}).get("needs_retrieval", True):
-            return "direct_answer"
-        if intent == INTENT_NEED_CLARIFICATION:
+        if intent == INTENT_NEED_CLARIFICATION or action == "need_clarification" or scope in {"need_clarification", RETRIEVAL_SCOPE_NEED_CLARIFICATION}:
             return "clarification"
-        return "scope_resolver"
+        if intent == INTENT_GENERAL_QUERY or not intent_resolution.get("needs_retrieval", True):
+            return "direct_answer"
+        if action == "reuse_last_filter":
+            return "build_filter"
+        if intent_resolution.get("is_follow_up"):
+            return "rewrite_query"
+        return "document_resolver"
 
     def route_after_scope_resolution(self, state: dict[str, Any]) -> str:
         scope_resolution = state.get("scope_resolution") or {}
         action = scope_resolution.get("action")
-        if action == "need_clarification" or scope_resolution.get("scope") == RETRIEVAL_SCOPE_NEED_CLARIFICATION:
+        scope = scope_resolution.get("scope")
+        if action == "need_clarification" or scope in {"need_clarification", RETRIEVAL_SCOPE_NEED_CLARIFICATION}:
             return "clarification"
         if action == "reuse_last_filter":
             return "build_filter"

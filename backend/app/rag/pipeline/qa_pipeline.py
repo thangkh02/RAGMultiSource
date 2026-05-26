@@ -5,7 +5,7 @@ from app.rag.graph import RAGGraphRunner
 from app.rag.query import IntentRouter
 from app.rag.rewrite import QueryRewriter, RewriteGate
 from app.rag.retrieval.context_validator import FALLBACK_NO_CONTEXT, ContextValidator
-from app.rag.retrieval.resolvers import DocumentResolver, ScopeResolver
+from app.rag.retrieval.resolvers import DocumentResolver
 from app.rag.retrieval.retriever import Retriever
 from app.rag.retrieval.strategy import RetrievalStrategy
 from langsmith import traceable
@@ -15,7 +15,6 @@ class QAPipeline:
     def __init__(self) -> None:
         self.rewrite_gate = RewriteGate()
         self.intent_router = IntentRouter()
-        self.scope_resolver = ScopeResolver()
         self.document_resolver = DocumentResolver()
         self.query_rewriter = QueryRewriter()
         self.retrieval_strategy = RetrievalStrategy()

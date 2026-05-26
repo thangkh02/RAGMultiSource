@@ -17,7 +17,6 @@ from app.utils.text_utils import count_tokens_rough
 @dataclass
 class RewriteGateDecision:
     needs_rewrite: bool
-    reason: str
     matched_rules: list[str] = field(default_factory=list)
     used_llm: bool = False
 
@@ -66,7 +65,7 @@ class RewriteGate:
                         "needs_rewrite=false khi câu hỏi đã rõ nghĩa, là chào hỏi, hoặc không có đủ context lịch sử.\n"
                         "Không quyết định scope, không trả lời câu hỏi.\n\n"
                         "Schema JSON:\n"
-                        "{\"needs_rewrite\": true|false, \"reason\": \"...\", \"matched_rules\": [\"...\"]}"
+                        "{{\"needs_rewrite\": true|false, \"matched_rules\": [\"...\"]}}"
                     ),
                 ),
                 (
@@ -82,7 +81,7 @@ class RewriteGate:
                 ),
                 (
                     "ai",
-                    "{\"needs_rewrite\": true, \"reason\": \"Câu hỏi nối tiếp cần file trước đó để hiểu đúng.\", \"matched_rules\": [\"follow_up\", \"active_document\", \"has_history\"]}",
+                    "{{\"needs_rewrite\": true, \"matched_rules\": [\"follow_up\", \"active_document\", \"has_history\"]}}",
                 ),
                 (
                     "human",
@@ -97,7 +96,7 @@ class RewriteGate:
                 ),
                 (
                     "ai",
-                    "{\"needs_rewrite\": false, \"reason\": \"Câu chào hỏi không cần rewrite để retrieval.\", \"matched_rules\": [\"general_query\"]}",
+                    "{{\"needs_rewrite\": false, \"matched_rules\": [\"general_query\"]}}",
                 ),
                 (
                     "human",
@@ -178,7 +177,6 @@ class RewriteGate:
         if self._has_resolved_context(conversation_state) and any(term in normalized for term in self._follow_up_terms):
             return RewriteGateDecision(
                 needs_rewrite=True,
-                reason="Deterministic fallback detected a follow-up query with previous resolved context.",
                 matched_rules=["fallback_follow_up", "has_resolved_context"],
                 used_llm=False,
             )
@@ -187,7 +185,6 @@ class RewriteGate:
     def _fallback_decision(self) -> RewriteGateDecision:
         return RewriteGateDecision(
             needs_rewrite=False,
-            reason="Rewrite gate LLM is unavailable or returned invalid JSON; defaulted to no rewrite.",
             matched_rules=["llm_unavailable"],
             used_llm=False,
         )
@@ -219,7 +216,6 @@ class RewriteGate:
 
         return RewriteGateDecision(
             needs_rewrite=bool(payload.get("needs_rewrite")),
-            reason=str(payload.get("reason") or "Resolved by OpenRouter rewrite gate."),
             matched_rules=[str(item) for item in payload.get("matched_rules", []) if item],
             used_llm=True,
         )

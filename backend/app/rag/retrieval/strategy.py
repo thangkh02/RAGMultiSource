@@ -69,7 +69,7 @@ class RetrievalStrategy:
             return RetrievalPlan(mode="none", should_retrieve=False, reason="Intent does not need retrieval.")
 
         intent = intent_resolution.get("intent", "ask_question")
-        if scope == RETRIEVAL_SCOPE_HYBRID_SYSTEM_AND_USER or intent == "compare_documents":
+        if scope in {"mixed", RETRIEVAL_SCOPE_HYBRID_SYSTEM_AND_USER} or intent == "compare_documents":
             system_filter, user_filter = self._split_hybrid_filter(metadata_filter)
             return RetrievalPlan(
                 mode="hybrid_compare",

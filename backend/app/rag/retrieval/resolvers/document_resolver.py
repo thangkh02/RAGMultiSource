@@ -9,6 +9,7 @@ from app.core.constants import (
     RETRIEVAL_SCOPE_CURRENT_SESSION_UPLOADS,
     RETRIEVAL_SCOPE_CURRENT_UPLOAD,
     RETRIEVAL_SCOPE_HYBRID_SYSTEM_AND_USER,
+    RETRIEVAL_SCOPE_SYSTEM_DOCS,
     RETRIEVAL_SCOPE_SYSTEM_PROCEDURE,
     RETRIEVAL_SCOPE_USER_ALL_UPLOADS,
     RETRIEVAL_SCOPE_USER_FILE_NAME,
@@ -57,6 +58,18 @@ class DocumentResolver:
     def __init__(self, document_repository: DocumentRepository | None = None) -> None:
         self.document_repository = document_repository or DocumentRepository()
 
+    def _is_system_scope(self, scope: str) -> bool:
+        return scope in {"system_only", RETRIEVAL_SCOPE_SYSTEM_PROCEDURE, RETRIEVAL_SCOPE_SYSTEM_DOCS}
+
+    def _is_current_upload_scope(self, scope: str) -> bool:
+        return scope in {"current_uploads_only", RETRIEVAL_SCOPE_CURRENT_SESSION_UPLOADS, RETRIEVAL_SCOPE_CURRENT_UPLOAD}
+
+    def _is_past_upload_scope(self, scope: str) -> bool:
+        return scope in {"past_uploads_only", "user_uploads_all", RETRIEVAL_SCOPE_USER_ALL_UPLOADS}
+
+    def _is_mixed_scope(self, scope: str) -> bool:
+        return scope in {"mixed", RETRIEVAL_SCOPE_HYBRID_SYSTEM_AND_USER}
+
     def _with_document_filter(self, metadata_filter: dict[str, Any], document_ids: list[str]) -> dict[str, Any]:
         document_ids = [document_id for document_id in document_ids if document_id]
         if not document_ids:
@@ -95,10 +108,17 @@ class DocumentResolver:
         if source_type != SOURCE_TYPE_USER_UPLOAD or document.get("owner_user_id") != user_id:
             return False
 
-        if scope in {RETRIEVAL_SCOPE_CURRENT_SESSION_UPLOADS, RETRIEVAL_SCOPE_CURRENT_UPLOAD}:
+        if scope in {
+            "current_uploads_only",
+            RETRIEVAL_SCOPE_CURRENT_SESSION_UPLOADS,
+            RETRIEVAL_SCOPE_CURRENT_UPLOAD,
+        }:
             return bool(session_id) and document.get("uploaded_in_session_id") == session_id
 
         return scope in {
+            "past_uploads_only",
+            "user_uploads_all",
+            "mixed",
             RETRIEVAL_SCOPE_USER_ALL_UPLOADS,
             RETRIEVAL_SCOPE_USER_FILE_NAME,
             RETRIEVAL_SCOPE_HYBRID_SYSTEM_AND_USER,
@@ -171,7 +191,7 @@ class DocumentResolver:
                 reason="explicit selected document ids after authorization check",
             )
 
-        if scope == RETRIEVAL_SCOPE_SYSTEM_PROCEDURE and detected_procedure_title:
+        if self._is_system_scope(scope) and detected_procedure_title:
             documents = await self._find_system_documents_by_procedure_hint(detected_procedure_title)
             document_ids = [doc["_id"] for doc in documents if doc.get("_id")]
             return DocumentResolution(
@@ -193,7 +213,7 @@ class DocumentResolver:
                 reason="matched uploaded filename",
             )
 
-        if scope in {RETRIEVAL_SCOPE_CURRENT_SESSION_UPLOADS, RETRIEVAL_SCOPE_CURRENT_UPLOAD} and session_id:
+        if self._is_current_upload_scope(scope) and session_id:
             documents = await self.document_repository.list_user_documents_by_session(user_id, session_id)
             if not documents and conversation_state.get("current_session_docs"):
                 document_ids = [doc_id for doc_id in conversation_state["current_session_docs"] if doc_id]
@@ -211,7 +231,7 @@ class DocumentResolver:
                 reason="matched current session uploads",
             )
 
-        if scope == RETRIEVAL_SCOPE_USER_ALL_UPLOADS:
+        if self._is_past_upload_scope(scope):
             if time_hint:
                 documents = await self.document_repository.list_user_documents_by_time_hint(
                     user_id,
@@ -241,6 +261,35 @@ class DocumentResolver:
                 selected_document_ids=document_ids,
                 resolved_documents=self._serialize_docs(documents[:1]),
                 reason="used latest user upload",
+            )
+
+        if self._is_mixed_scope(scope):
+            system_documents: list[dict[str, Any]] = []
+            user_documents: list[dict[str, Any]] = []
+            if detected_procedure_title:
+                system_documents = await self._find_system_documents_by_procedure_hint(detected_procedure_title)
+            if detected_filename:
+                user_documents = await self.document_repository.find_user_documents_by_filename(user_id, detected_filename)
+            elif time_hint:
+                user_documents = await self.document_repository.list_user_documents_by_time_hint(
+                    user_id,
+                    time_hint,
+                    filename=detected_filename,
+                )
+            elif session_id:
+                user_documents = await self.document_repository.list_user_documents_by_session(user_id, session_id)
+            else:
+                latest_user_documents = await self.document_repository.list_user_ready_documents(user_id)
+                user_documents = latest_user_documents[:1]
+
+            documents = system_documents + [doc for doc in user_documents if doc not in system_documents]
+            document_ids = [doc["_id"] for doc in documents if doc.get("_id")]
+            return DocumentResolution(
+                metadata_filter=self._with_document_filter(metadata_filter, document_ids),
+                selected_document_ids=document_ids,
+                resolved_documents=self._serialize_docs(documents),
+                needs_clarification=len(documents) > 1,
+                reason="resolved mixed system and user-upload scope",
             )
 
         return DocumentResolution(metadata_filter=metadata_filter, reason="scope does not require a specific document")

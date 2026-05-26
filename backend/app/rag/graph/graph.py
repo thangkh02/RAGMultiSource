@@ -17,11 +17,9 @@ class RAGGraphRunner:
     def _build_graph(self) -> StateGraph:
         graph = StateGraph(RAGState)
         graph.add_node("load_context", self.nodes.load_context_node)
-        graph.add_node("rewrite_detector", self.nodes.rewrite_detector_node)
         graph.add_node("rewrite_query", self.nodes.rewrite_query_node)
         graph.add_node("use_original_query", self.nodes.use_original_query_node)
         graph.add_node("intent_router", self.nodes.intent_router_node)
-        graph.add_node("scope_resolver", self.nodes.scope_resolver_node)
         graph.add_node("document_resolver", self.nodes.document_resolver_node)
         graph.add_node("candidate_selector", self.nodes.candidate_selector_node)
         graph.add_node("build_filter", self.nodes.build_filter_node)
@@ -36,13 +34,7 @@ class RAGGraphRunner:
         graph.add_node("update_state", self.nodes.update_state_node)
 
         graph.set_entry_point("load_context")
-        graph.add_edge("load_context", "rewrite_detector")
-        graph.add_conditional_edges(
-            "rewrite_detector",
-            self.nodes.route_after_rewrite_gate,
-            {"rewrite_query": "rewrite_query", "use_original_query": "use_original_query"},
-        )
-        graph.add_edge("rewrite_query", "intent_router")
+        graph.add_edge("load_context", "use_original_query")
         graph.add_edge("use_original_query", "intent_router")
         graph.add_conditional_edges(
             "intent_router",
@@ -51,19 +43,12 @@ class RAGGraphRunner:
                 "direct_answer": "direct_answer",
                 "clarification": "clarification",
                 "unsupported": "unsupported",
-                "scope_resolver": "scope_resolver",
-            },
-        )
-        graph.add_conditional_edges(
-            "scope_resolver",
-            self.nodes.route_after_scope_resolution,
-            {
                 "build_filter": "build_filter",
-                "direct_answer": "direct_answer",
-                "clarification": "clarification",
+                "rewrite_query": "rewrite_query",
                 "document_resolver": "document_resolver",
             },
         )
+        graph.add_edge("rewrite_query", "document_resolver")
         graph.add_edge("document_resolver", "candidate_selector")
         graph.add_conditional_edges(
             "candidate_selector",

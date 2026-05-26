@@ -137,12 +137,12 @@ class QueryRewriter:
         conversation_state: dict[str, Any] | None = None,
     ) -> QueryRewrite:
         conversation_state = conversation_state or {}
-        if intent_resolution.get("intent") != REWRITE_INTENT_FOLLOW_UP:
+        if not intent_resolution.get("is_follow_up"):
             return QueryRewrite(
                 original_question=question,
                 rewritten_question=question,
                 was_rewritten=False,
-                reason="Intent is not follow_up; query is passed through.",
+                reason="Intent router did not mark query as follow-up; query is passed through.",
                 stage="post_intent",
             )
 
